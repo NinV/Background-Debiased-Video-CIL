@@ -1,0 +1,5 @@
+.idea/
+work_dirs/
+data/
+**/__cache__/
+tests/
