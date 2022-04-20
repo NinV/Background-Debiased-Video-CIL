@@ -1,8 +1,8 @@
 _base_ = [
-    '../../_base_/models/tsm_r34_inc_cosine_linear.py', '../../_base_/schedules/sgd_tsm_50e.py',
+    '../../_base_/models/tsm_r34_inc_cosine_linear.py',
     '../../_base_/default_runtime.py'
 ]
-gpu_ids = [1]
+gpu_ids = [0]
 task_index = 1
 
 # model settings
@@ -100,10 +100,15 @@ evaluation = dict(
 
 # optimizer
 optimizer = dict(
-    lr=0.0015,  # this lr is used for 8 gpus
-)
+    type='SGD',
+    constructor='CILTSMOptimizerConstructor',
+    paramwise_cfg=dict(fc_lr5=True),
+    lr=0.001,
+    momentum=0.9,
+    weight_decay=0.0001)
+optimizer_config = dict(grad_clip=dict(max_norm=20, norm_type=2))
 # learning policy
-lr_config = dict(policy='step', step=[10, 20])
+lr_config = dict(policy='step', step=[20, 30])
 total_epochs = 50
 
 # load_from = 'https://download.openmmlab.com/mmaction/recognition/tsm/tsm_r50_256p_1x1x8_50e_kinetics400_rgb/tsm_r50_256p_1x1x8_50e_kinetics400_rgb_20200726-020785e2.pth'  # noqa: E501
