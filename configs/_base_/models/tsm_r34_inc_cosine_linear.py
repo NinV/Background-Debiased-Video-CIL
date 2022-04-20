@@ -10,6 +10,7 @@ model = dict(
     cls_head=dict(
         type='IncrementalTSMHead',
         inc_head_config=dict(type='CosineLinear', nb_proxy=3),
+        loss_cls=dict(type='NCALoss'),
         num_classes=400,
         in_channels=512,
         spatial_type='avg',
