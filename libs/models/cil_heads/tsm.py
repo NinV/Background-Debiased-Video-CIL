@@ -10,12 +10,13 @@ from mmaction.models.builder import HEADS
 
 from .inc_net import IncrementalNet, CosineIncrementalNet
 from .linears import SimpleLinear, CosineLinear, SplitCosineLinear
-
+from .cosine_linear import LSC, LSCLoss
 
 
 inc_linear_layers = {
     'CosineLinear': CosineIncrementalNet,
-    'SimpleLinear': IncrementalNet
+    'SimpleLinear': IncrementalNet,
+    'LocalSimilarityClassifier': LSC
 }
 
 @HEADS.register_module()
@@ -23,7 +24,7 @@ class IncrementalTSMHead(TSMHead):
     def __init__(self,
                  num_classes,
                  in_channels,
-                 inc_head_config=dict(type='CosineLinear', nb_proxy=1),
+                 inc_head_config=dict(type='LocalSimilarityClassifier'),
                  num_segments=8,
                  loss_cls=dict(type='CrossEntropyLoss'),
                  spatial_type='avg',
@@ -212,7 +213,7 @@ class CILTSMOptimizerConstructor(DefaultOptimizerConstructor):
                     normal_weight.append(m_params[0])
                     if len(m_params) == 2:
                         normal_bias.append(m_params[1])
-            elif isinstance(m, (torch.nn.Linear, SimpleLinear, CosineLinear, SplitCosineLinear)):    # support SimpleLinear
+            elif isinstance(m, torch.nn.Linear):    # support SimpleLinear
                 m_params = list(m.parameters())
                 normal_weight.append(m_params[0])
                 if len(m_params) == 2:
@@ -223,20 +224,34 @@ class CILTSMOptimizerConstructor(DefaultOptimizerConstructor):
                     if param.requires_grad:
                         bn.append(param)
 
+            elif isinstance(m, LSC):
+                m_params = list(m.parameters())
+                if fc_lr5:
+                    lr5_weight.append(m_params[0])
+                else:
+                    normal_weight.append(m_params[0])
+            elif isinstance(m, LSCLoss):
+                eta = list(m.parameters())[0]
+                if m.learnable_eta:
+                    if fc_lr5:
+                        lr5_weight.append(eta)
+                    else:
+                        normal_weight.append(eta)
+
             elif len(m._modules) == 0:
                 if len(list(m.parameters())) > 0:
                     raise ValueError(f'New atomic module type: {type(m)}. '
                                      'Need to give it a learning policy')
 
         # pop the cls_head fc layer params
-        last_fc_weight = normal_weight.pop()
-        last_fc_bias = normal_bias.pop()
-        if fc_lr5:
-            lr5_weight.append(last_fc_weight)
-            lr10_bias.append(last_fc_bias)
-        else:
-            normal_weight.append(last_fc_weight)
-            normal_bias.append(last_fc_bias)
+        # last_fc_weight = normal_weight.pop()
+        # last_fc_bias = normal_bias.pop()
+        # if fc_lr5:
+        #     lr5_weight.append(last_fc_weight)
+        #     lr10_bias.append(last_fc_bias)
+        # else:
+        #     normal_weight.append(last_fc_weight)
+        #     normal_bias.append(last_fc_bias)
 
         params.append({
             'params': first_conv_weight,
