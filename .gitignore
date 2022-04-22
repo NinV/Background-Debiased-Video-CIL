@@ -1,5 +1,5 @@
 .idea/
 work_dirs/
 data/
-**/__cache__/
+**/__pycache__/
 tests/
