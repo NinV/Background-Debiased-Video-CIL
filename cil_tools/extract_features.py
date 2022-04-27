@@ -1,22 +1,25 @@
 import argparse
+import pathlib
+
 import numpy as np
+from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
-from tqdm import tqdm
-
 from mmcv import Config
 from mmcv.runner import get_dist_info, init_dist, load_checkpoint
 from mmaction.models import build_model
 from mmaction.datasets import build_dataset
 from mmaction.core import OutputHook
 
+import libs     # for registering some modules
+
 def parse_args():
-    # config_file = 'configs/cil/tsm/tsm_r34_1x1x8_25e_ucf101_rgb_task_0.py'
-    # ckpt_file = 'work_dirs/tsm_r34_1x1x8_25e_ucf101_hflip_rgb_task_0/epoch_50.pth'
     parser = argparse.ArgumentParser()
-    parser.add_argument('config_file')
-    parser.add_argument('ckpt_file')
+    parser.add_argument('root_dir', help='Directory contains both config file and ckpt file')
+    parser.add_argument('--config_file', default='config.py')
+    parser.add_argument('--ckpt_file', default='latest.pth')
     parser.add_argument('--device', default='cuda:0')
+    parser.add_argument('--dst', default='features/out.json')
     return parser.parse_args()
 
 
@@ -52,10 +55,15 @@ def single_prediction(model, sample, device):
 
 def main():
     args = parse_args()
-    cfg = Config.fromfile(args.config_file)
+    root_dir = pathlib.Path(args.root_dir)
+
+    dst = pathlib.Path((root_dir / args.dst))
+    dst.parent.mkdir(exist_ok=True, parents=True)
+
+    cfg = Config.fromfile(str(root_dir / args.config_file))
     device = torch.device(args.device)
 
-    model = load_model(cfg, args.ckpt_file)
+    model = load_model(cfg, str(root_dir / args.ckpt_file))
     model = model.to(device).eval()
     train_dataset = build_train_dataset(cfg)
 
@@ -76,8 +84,9 @@ def main():
             except KeyError:
                 features_by_class[sample_info['label']] = [sample_info]
     import json
-    with open('../features.json', 'w') as f:
+    with open(dst, 'w') as f:
         json.dump(features_by_class, f)
+    print('Saved features at:', dst)
 
 
 if __name__ == '__main__':

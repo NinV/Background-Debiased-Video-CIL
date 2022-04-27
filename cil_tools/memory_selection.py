@@ -1,140 +1,237 @@
 import argparse
-import json
+from typing import List, Dict, Optional, Union
+import pathlib
+
 import numpy as np
-from tqdm import tqdm
+import json
 
-"""
- def _construct_exemplar_unified(self, data_manager, m):
-        logging.info('Constructing exemplars for new classes...({} per classes)'.format(m))
-        _class_means = np.zeros((self._total_classes, self.feature_dim))
+import torch
+from torch.nn import functional as F
 
-        # Calculate the means of old classes with newly trained network
-        for class_idx in range(self._known_classes):
-            mask = np.where(self._targets_memory == class_idx)[0]
-            class_data, class_targets = self._data_memory[mask], self._targets_memory[mask]
-
-            class_dset = data_manager.get_dataset([], source='train', mode='test',
-                                                  appendent=(class_data, class_targets))
-            class_loader = DataLoader(class_dset, batch_size=batch_size, shuffle=False, num_workers=4)
-            vectors, _ = self._extract_vectors(class_loader)
-            vectors = (vectors.T / (np.linalg.norm(vectors.T, axis=0) + EPSILON)).T
-            mean = np.mean(vectors, axis=0)
-            mean = mean / np.linalg.norm(mean)
-
-            _class_means[class_idx, :] = mean
-
-        # Construct exemplars for new classes and calculate the means
-        for class_idx in range(self._known_classes, self._total_classes):
-            data, targets, class_dset = data_manager.get_dataset(np.arange(class_idx, class_idx+1), source='train',
-                                                                 mode='test', ret_data=True)
-            class_loader = DataLoader(class_dset, batch_size=batch_size, shuffle=False, num_workers=4)
-
-            vectors, _ = self._extract_vectors(class_loader)
-            vectors = (vectors.T / (np.linalg.norm(vectors.T, axis=0) + EPSILON)).T
-            class_mean = np.mean(vectors, axis=0)
-
-            # Select
-            selected_exemplars = []
-            exemplar_vectors = []
-            for k in range(1, m+1):
-                S = np.sum(exemplar_vectors, axis=0)  # [feature_dim] sum of selected exemplars vectors
-                mu_p = (vectors + S) / k  # [n, feature_dim] sum to all vectors
-                i = np.argmin(np.sqrt(np.sum((class_mean - mu_p) ** 2, axis=1)))
-
-                selected_exemplars.append(np.array(data[i]))  # New object to avoid passing by inference
-                exemplar_vectors.append(np.array(vectors[i]))  # New object to avoid passing by inference
-
-                vectors = np.delete(vectors, i, axis=0)  # Remove it to avoid duplicative selection
-                data = np.delete(data, i, axis=0)  # Remove it to avoid duplicative selection
-
-            selected_exemplars = np.array(selected_exemplars)
-            exemplar_targets = np.full(m, class_idx)
-            self._data_memory = np.concatenate((self._data_memory, selected_exemplars)) if len(self._data_memory) != 0 \
-                else selected_exemplars
-            self._targets_memory = np.concatenate((self._targets_memory, exemplar_targets)) if \
-                len(self._targets_memory) != 0 else exemplar_targets
-
-            # Exemplar mean
-            exemplar_dset = data_manager.get_dataset([], source='train', mode='test',
-                                                     appendent=(selected_exemplars, exemplar_targets))
-            exemplar_loader = DataLoader(exemplar_dset, batch_size=batch_size, shuffle=False, num_workers=4)
-            vectors, _ = self._extract_vectors(exemplar_loader)
-            vectors = (vectors.T / (np.linalg.norm(vectors.T, axis=0) + EPSILON)).T
-            mean = np.mean(vectors, axis=0)
-            mean = mean / np.linalg.norm(mean)
-
-            _class_means[class_idx, :] = mean
-
-        self._class_means = _class_means
-© 2022 GitHub, Inc.
-Terms
-Privacy
-Security
-
-
-"""
-
-
-"""
-Generally, cluster validity measures are categorized into 3 classes, they are – 
- 
-
-Internal cluster validation : The clustering result is evaluated based on the data clustered itself 
-(internal information) without reference to external information.
-
-External cluster validation : Clustering results are evaluated based on some externally known result, 
-such as externally provided class labels.
-
-Relative cluster validation : The clustering results are evaluated by varying different parameters for the same algorithm (e.g. changing the number of clusters).
-
-"""
 
 def parse_args():
-    # config_file = 'configs/cil/tsm/tsm_r34_1x1x8_25e_ucf101_rgb_task_0.py'
-    # ckpt_file = 'work_dirs/tsm_r34_1x1x8_25e_ucf101_hflip_rgb_task_0/epoch_50.pth'
     parser = argparse.ArgumentParser()
-    parser.add_argument('json_file')
-    parser.add_argument('--size', type=int, default=5)
+    parser.add_argument('data_file')
+    parser.add_argument('--dst', default='exemplar.json')
+    parser.add_argument('--method', default='cosine')
+    parser.add_argument('--budget_size', type=int, default=20)
     return parser.parse_args()
 
 
-class CHI:
-    """
-    Calinski-Harabasz Index
-    """
-    def __init__(self):
-        pass
+class MemoryTracker:
+    def __init__(self, store_method='min'):
 
-    def __call__(self, ):
+        assert store_method in ['max', 'min']
+        self._store_max = store_method == 'max'
+        if self._store_max:
+            self._best_score = float('-inf')
+        else:
+            self._best_score = float('inf')
+
+        self._best_sample_features = None
+        self._best_sample_video_path = None
+        self._best_sample_idx = -1
+
+    def update(self, score, sample_video_path, sample_features, sample_idx):
+        if (self._store_max and self._best_score < score) or \
+                (not self._store_max and self._best_score > score):
+            self._best_score = score
+            self._best_sample_video_path = sample_video_path
+            self._best_sample_features = sample_features
+            self._best_sample_idx = sample_idx
+
+    def reset_params(self):
+        if self._store_max:
+            self._best_score = float('-inf')
+        else:
+            self._best_score = float('inf')
+
+        self._best_sample_features = None
+        self._best_sample_video_path = None
+
+    def return_best(self):
+        return self._best_sample_video_path, self._best_sample_features, self._best_score, self._best_sample_idx
+
+
+class DataPool:
+    def __init__(self,
+                 video_paths: List[Union[pathlib.Path, str]],
+                 all_features: List[torch.Tensor],
+                 normalized_mean=False):
+        assert len(video_paths) == len(all_features)
+
+        self.video_paths = video_paths
+        self.all_features = all_features
+        self.normalized_mean = normalized_mean
+        # initialize stats
+        self._mean_features = None
+
+        # update stats
+        if video_paths:
+            self.calc_stats()
+
+    def calc_stats(self):
+        self._mean_features = calc_mean(torch.stack(self.all_features, dim=0), self.normalized_mean)
+
+    @property
+    def mean_features(self):
+        return self._mean_features
+
+    def __getitem__(self, idx):
+        return self.video_paths[idx], self.all_features[idx]
+
+    def __len__(self):
+        return len(self.video_paths)
+
+
+class Memory:
+    def __init__(self,
+                 video_paths: List[Union[pathlib.Path, str]],
+                 all_features: List[torch.Tensor],
+                 normalized_mean=False):
+        assert len(video_paths) == len(all_features)
+
+        self.video_paths = video_paths
+        self.all_features = all_features
+        self.normalized_mean = normalized_mean
+
+        # initialize stats
+        self._mean_features = None
+
+        # update stats
+        if video_paths:
+            self.calc_stats()
+
+    def calc_stats(self):
+        self._mean_features = calc_mean(torch.stack(self.all_features, dim=0), self.normalized_mean)
+        return self.mean_features
+
+    def update(self, sample_video_path, sample_features) -> None:
+        self.all_features.append(sample_features)
+        self.video_paths.append(sample_video_path)
+
+        if self.normalized_mean:
+            sample_features = F.normalize(sample_features, p=2, dim=0)
+
+        if self._mean_features is None:
+            self._mean_features = sample_features
+            return
+
+        self.calc_stats()
+
+    def pop_last(self):
+        n = len(self.video_paths)
+        if n == 0:
+            return
+        self.video_paths.pop()
+        last_features = self.all_features.pop()
+        if n == 1:
+            self._mean_features = None
+        else:
+            self._mean_features = (n * self._mean_features - last_features) / (n - 1)
+
+    @property
+    def mean_features(self):
+        return self._mean_features
+
+    def to_json(self, write_features=False):
+        return {
+            'video_paths': [str(path_) for path_ in self.video_paths],
+            'normalized_mean': self.normalized_mean,
+            'mean': self.calc_stats().tolist()
+        }
+
+    def __getitem__(self, idx):
+        return self.video_paths[idx], self.all_features[idx]
+
+    def __len__(self):
+        return len(self.video_paths)
+
+
+def calc_mean(input_, normalized_mean):
+    if normalized_mean:
+        features = F.normalize(input_, p=2, dim=1)
+    else:
+        features = input_
+    return torch.mean(features, dim=0)
+
+
+def calc_dist(memory: Memory, data_pool: DataPool, method_index: int) -> float:
+    assert memory.normalized_mean == data_pool.normalized_mean
+    if method_index == 0:  # euclidean distance of mean_features
+        dist = F.pairwise_distance(data_pool.mean_features, memory.mean_features, p=2)
+
+    elif method_index == 1:
+        dist = 1 - F.cosine_similarity(data_pool.mean_features, memory.mean_features, dim=0)
+    else:
+        raise NotImplementedError
+    return dist
+
+
+def greedy_memory_selection(budget_size: int, data_pool: DataPool, memory: Memory, method_index: int):
+    tracker = MemoryTracker()
+    sample_indices = set(range(len(data_pool)))
+    best_score_history = []
+    while len(memory) < budget_size:
+        for idx in sample_indices:
+            sample_data = data_pool[idx]
+
+            memory.update(*sample_data)
+            dist = calc_dist(memory, data_pool, method_index)
+            memory.pop_last()
+            tracker.update(dist, *sample_data, idx)
+
+        best_sample_video_path, best_sample_features, best_score, best_sample_idx = tracker.return_best()
+        tracker.reset_params()
+
+        memory.update(best_sample_video_path, best_sample_features)
+        sample_indices.remove(best_sample_idx)
+        best_score_history.append(best_score.item())
+
+    # print(best_score_history)
+
+def write_exemplar(exemplar):
+    pass
 
 def main():
     args = parse_args()
-    with open(args.json_file, 'r') as f:
+
+    assert args.method in ['euclidean', 'cosine']
+    method_dict = {'euclidean': 0,
+                   'cosine': 1,
+                   }
+
+    method_index = method_dict[args.method]
+    if method_index == 0:
+        normalized_mean = False
+    else:
+        normalized_mean = True
+
+    with open(args.data_file, 'r') as f:
         data = json.load(f)
 
-    num_classes = len(data.keys())
-
     exemplar = {}
-    for cls_id, sample_list in data.items():
-        exemplar[cls_id] = []
-        sample_dict = {s['frame_dir']: [s['cls_score'], s['repr_consensus'], s['total_frames'], s['label']] for s in sample_list}
+    for class_label, info_per_class in data.items():
+        video_paths = []
+        all_features = []
+        for sample_info in info_per_class:
+            video_paths.append(sample_info['frame_dir'])
+            all_features.append(torch.Tensor(sample_info['repr_consensus'][0]))  # TODO fix extract_features function
 
-        similarity_score = float('-inf')
-        while len(exemplar[cls_id]) < args['size']:
-            for sample_frame_dir, [cls_score, repr_consensus, total_frames, label] in sample_dict.items():
-                score = similarity_score(exemplar[cls_id])
+        # all_features = torch.Tensor(all_features)
+        data_pool = DataPool(video_paths, all_features, normalized_mean)
+        memory = Memory([], [], normalized_mean)
 
+        greedy_memory_selection(args.budget_size, data_pool, memory, method_index)
+        exemplar[int(class_label)] = memory
 
-        cls_score = sa
-        # if torch.argmax(cls_score).item() == sample_info['label']:
-        #     sample_info['cls_score'] = cls_score.tolist()
-        #     sample_info['repr_consensus'] = repr_consensus.tolist()
-        #     try:
-        #         features_by_class[sample_info['label']].append(sample_info)
-        #     except KeyError:
-        #         features_by_class[sample_info['label']] = [sample_info]
+    for class_label, mem in exemplar.items():
+        mem_json = mem.to_json()
+        exemplar[class_label] = mem_json
 
-
+    exemplar['method'] = args.method
+    with open(args.dst, 'w') as f:
+        json.dump(exemplar, f, indent=2)
 
 
 if __name__ == '__main__':
