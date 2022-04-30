@@ -211,12 +211,12 @@ def main():
         data = json.load(f)
 
     exemplar = {}
-    for class_label, info_per_class in data.items():
+    for class_label, info_per_class in data['features_by_class'].items():
         video_paths = []
         all_features = []
         for sample_info in info_per_class:
             video_paths.append(sample_info['frame_dir'])
-            all_features.append(torch.Tensor(sample_info['repr_consensus'][0]))  # TODO fix extract_features function
+            all_features.append(torch.Tensor(sample_info['repr_consensus'][0]))  # TODO: each sample may generate multiple features because of data augmentation
 
         # all_features = torch.Tensor(all_features)
         data_pool = DataPool(video_paths, all_features, normalized_mean)

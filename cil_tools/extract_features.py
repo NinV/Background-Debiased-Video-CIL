@@ -83,9 +83,12 @@ def main():
                 features_by_class[sample_info['label']].append(sample_info)
             except KeyError:
                 features_by_class[sample_info['label']] = [sample_info]
+
     import json
+    data = {'features_by_class': features_by_class,
+            'model_weights': next(model.cls_head.fc_cls.parameters()).data.tolist()}
     with open(dst, 'w') as f:
-        json.dump(features_by_class, f)
+        json.dump(data, f)
     print('Saved features at:', dst)
 
 
