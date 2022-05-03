@@ -45,7 +45,16 @@ class LSC(nn.Module):
         return torch.sum(proxy_scores * similarities_per_class, dim=2, keepdim=False)
 
     def update_fc(self, nb_classes):
-        pass
+        new_weight = torch.empty(nb_classes, self.nb_proxies * self.in_features).type_as(self.weights.data)
+        nn.init.kaiming_normal_(new_weight, nonlinearity='linear')
+        new_weight[:self.out_features] = self.weights.data
+        self.weights = nn.Parameter(new_weight, requires_grad=True)
+        self.out_features = nb_classes
+
+    def __repr__(self):
+        return "LocalSimilarityClassifier(in_features: {}, out_features: {}, nb_proxies: {})".format(self.in_features,
+                                                                                                     self.out_features,
+                                                                                                     self.nb_proxies)
 
 
 @LOSSES.register_module()
