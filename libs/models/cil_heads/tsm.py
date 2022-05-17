@@ -63,6 +63,7 @@ class IncrementalTSMHead(TSMHead):
                              'before using "update_fc" method')
 
         self.fc_cls.update_fc(nb_classes)
+        self.num_classes = nb_classes
 
 
 class TSM(nn.Module):
