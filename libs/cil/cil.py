@@ -377,7 +377,7 @@ class CILTrainer:
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.num_epochs_per_task,
-                             limit_train_batches=10,
+                             # limit_train_batches=10,
                              # limit_val_batches=0.0,
                              )
         trainer.fit(self.cil_model, self.data_module)
@@ -431,6 +431,7 @@ class CILTrainer:
                 # 3. prepare data for next task and update model
                 self.data_module.reload_dataset(use_internal_exemplar=True)
             print('#####################################################################################\n')
+
     def print_task_info(self):
         print('Task {}, current heads: {}\n'
               'Training set size: {} (including {} samples from exemplar)'.format(self._current_task,
