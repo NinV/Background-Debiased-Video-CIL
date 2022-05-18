@@ -356,6 +356,9 @@ class CILTrainer:
         self.cil_model = BaseCIL(config)
         self.cil_model.controller = self
 
+        self.ckpt_dir = self.work_dir / 'ckpt'
+        self.ckpt_dir.mkdir(parents=True, exist_ok=True)
+
     # properties
     @property
     def current_task(self):
@@ -410,7 +413,7 @@ class CILTrainer:
             self._testing()
 
             # saving model weights
-            save_weight_destination = self.work_dir / 'ckpt' / 'ckpt_task_{}.pt'.format(self._current_task)
+            save_weight_destination = self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)
             torch.save(self.cil_model.current_model.state_dict(), save_weight_destination)
             print('save_model at:', str(save_weight_destination))
 
