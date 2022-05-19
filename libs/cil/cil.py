@@ -53,6 +53,7 @@ class CILDataModule(pl.LightningDataModule):
         self.features_extraction_dataset = None
         self.exemplar_datasets = []
 
+
     @property
     def current_task(self):
         return self.controller.current_task
@@ -64,10 +65,7 @@ class CILDataModule(pl.LightningDataModule):
             size += len(ex)
         return size
 
-    def prepare_data(self) -> None:
-        """
-        prepare_data is only called from the main process. Avoid assign internal state here
-        """
+    def generate_annotation_file(self) -> None:
         train_ann_file = pathlib.Path(self.config.train_ann_file)
         val_ann_file = pathlib.Path(self.config.val_ann_file)
         destination = self.work_dir / 'task_splits'
@@ -101,16 +99,6 @@ class CILDataModule(pl.LightningDataModule):
                     self.task_splits_ann_files[train_val].append(task_i_file_path)
                     print('create file at:', str(task_i_file_path))
 
-    def setup(self, stage: Optional[str] = None) -> None:
-        """
-        setup is called from every process across all the nodes. Setting state here is recommended.
-        """
-        self.config.data.train.ann_file = str(self.task_splits_ann_files['train'][self.current_task])
-        self.config.data.val.ann_file = str(self.task_splits_ann_files['val'][self.current_task])
-
-        self.train_dataset = build_dataset(self.config.data.train)
-        self.val_datasets.append(build_dataset(self.config.data.val))
-
     def reload_dataset(self,
                        exemplar: Optional[Union[RawframeDataset, List[RawframeDataset]]]=None,
                        use_internal_exemplar=True):
@@ -121,15 +109,14 @@ class CILDataModule(pl.LightningDataModule):
         self.config.data.train.ann_file = str(self.task_splits_ann_files['train'][self.current_task])
         self.train_dataset = build_dataset(self.config.data.train)
 
+        self.config.data.val.ann_file = str(self.task_splits_ann_files['val'][self.current_task])
+        self.val_datasets.append(build_dataset(self.config.data.val))
+
         if use_internal_exemplar:
             self.train_dataset = self.merge_dataset(self.train_dataset, self.exemplar_datasets)
 
         elif exemplar is not None:
             self.train_dataset = self.merge_dataset(self.train_dataset, exemplar)
-
-        self.config.data.val.ann_file = str(self.task_splits_ann_files['val'][self.current_task])
-        next_task_val_dataset = build_dataset(self.config.data.val)
-        self.val_datasets.append(next_task_val_dataset)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset,
@@ -291,29 +278,6 @@ class BaseCIL(pl.LightningModule):
                  batch_size=batch_size)
         return loss
 
-    # def validation_step(self, batch_data, batch_idx):
-    #     imgs, labels = batch_data['imgs'], batch_data['label']
-    #     losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
-    #
-    #     if self.use_kd and self.current_task > 0:
-    #         kd_loss = 0
-    #         kd_criterion = nn.MSELoss()
-    #         self.prev_model.eval()
-    #         with torch.no_grad():
-    #             self.prev_model.forward_test(imgs)
-    #
-    #         for m_name in self.kd_modules_names:
-    #             current_model_features = self.current_model_kd_hooks.layer_outputs[m_name]
-    #             prev_model_features = self.prev_model_kd_hooks.layer_outputs[m_name].detach()
-    #             kd_loss += kd_criterion(current_model_features, prev_model_features)
-    #     else:
-    #         losses['kd_loss'] = 0.
-    #     batch_size = imgs.shape[0]
-    #     self.log('train_loss_cls', losses['loss_cls'], on_step=False, on_epoch=True, prog_bar=True, logger=True,
-    #              batch_size=batch_size)
-    #     self.log('train_loss_kd', losses['kd_loss'], on_step=False, on_epoch=True, prog_bar=True, logger=True,
-    #              batch_size=batch_size)
-
     def predict_step(self, batch_data, batch_idx, dataloader_idx: Optional[int] = None):
         x = batch_data['imgs']
         cls_score = self.current_model(x, return_loss=False)
@@ -351,8 +315,8 @@ class CILTrainer:
 
         self.data_module = CILDataModule(config)
         self.data_module.controller = self
-        self.data_module.prepare_data()
-        self.data_module.setup()
+        self.data_module.generate_annotation_file()
+        self.data_module.reload_dataset(exemplar=None, use_internal_exemplar=False)
         self.cil_model = BaseCIL(config)
         self.cil_model.controller = self
 
