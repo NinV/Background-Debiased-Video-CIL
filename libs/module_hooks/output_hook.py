@@ -2,7 +2,7 @@ import functools
 
 
 class OutputHookWrapper:
-    def __init__(self, as_tensor=False):
+    def __init__(self, as_tensor=True):
         self.as_tensor = as_tensor
         self.output = None
 
@@ -26,7 +26,7 @@ class OutputHook:
             Default: False.
     """
 
-    def __init__(self, module, outputs=None, as_tensor=False):
+    def __init__(self, module, outputs=None, as_tensor=True):
         self.outputs = outputs
         self.as_tensor = as_tensor
         self._layer_outputs = {}
@@ -38,7 +38,7 @@ class OutputHook:
             for name in self.outputs:
                 try:
                     layer = rgetattr(module, name)
-                    hook = OutputHookWrapper()
+                    hook = OutputHookWrapper(as_tensor=self.as_tensor)
                     h = layer.register_forward_hook(hook)
                     self._layer_outputs[name] = hook
                 except AttributeError:
