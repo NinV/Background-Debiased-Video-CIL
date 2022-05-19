@@ -12,8 +12,8 @@ from mmcv.runner import build_optimizer
 from mmcv.utils.config import Config as mmcvConfig
 from mmaction.datasets import build_dataset, RawframeDataset
 from mmaction.models import build_model
-from mmaction.core import OutputHook
-
+# from mmaction.core import OutputHook
+from ..module_hooks import OutputHook
 import pytorch_lightning as pl
 from torchmetrics.classification import Accuracy
 
@@ -241,7 +241,7 @@ class BaseCIL(pl.LightningModule):
     # others
     def _extract_repr(self):
         # https://mmaction2.readthedocs.io/en/latest/_modules/mmaction/models/heads/tsm_head.html#TSMHead
-        repr = self._repr_hook.layer_outputs[self._repr_module_name].flatten(1)
+        repr = self._repr_hook.get_layer_output(self._repr_module_name).flatten(1)
         repr = repr.view(-1, self.current_model.cls_head.num_segments, repr.size(1))
         repr_consensus = self.current_model.cls_head.consensus(repr).squeeze(1)
         return repr_consensus
@@ -263,8 +263,8 @@ class BaseCIL(pl.LightningModule):
                 self.prev_model.forward_test(imgs)
 
             for m_name in self.kd_modules_names:
-                current_model_features = self.current_model_kd_hooks.layer_outputs[m_name]
-                prev_model_features = self.prev_model_kd_hooks.layer_outputs[m_name].detach()
+                current_model_features = self.current_model_kd_hooks.get_layer_output(m_name)
+                prev_model_features = self.prev_model_kd_hooks.get_layer_output(m_name).detach()
                 kd_loss += kd_criterion(current_model_features, prev_model_features)
             losses['kd_loss'] = kd_loss
         else:
