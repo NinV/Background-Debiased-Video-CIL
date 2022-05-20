@@ -345,7 +345,7 @@ class CILTrainer:
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.num_epochs_per_task,
                              # limit_train_batches=10,
-                             # limit_val_batches=0.0,
+                             accumulate_grad_batches=self.config.accumulate_grad_batches
                              )
         trainer.fit(self.cil_model, self.data_module)
 

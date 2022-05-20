@@ -8,6 +8,7 @@ gpu_ids = [0]
 # single gpu setting
 videos_per_gpu = 96
 workers_per_gpu = 12
+accumulate_grad_batches = 1
 work_dir = './work_dirs/test/'
 
 
