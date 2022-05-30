@@ -27,6 +27,7 @@ class CILDataModule(pl.LightningDataModule):
         self.config = config
 
         self.batch_size = config.videos_per_gpu
+        self.test_batch_size = config.testing_videos_per_gpu
         self.task_splits = config.task_splits
         self.work_dir = pathlib.Path(config.work_dir)
 
@@ -138,8 +139,8 @@ class CILDataModule(pl.LightningDataModule):
 
     def get_test_dataloader(self, task_idx: int):
         return DataLoader(self.test_datasets[task_idx],
-                          batch_size=self.batch_size,
-                          num_workers=self.config.workers_per_gpu,
+                          batch_size=self.test_batch_size,
+                          num_workers=self.config.testing_workers_per_gpu,
                           pin_memory=True,
                           shuffle=False
                           )
@@ -497,7 +498,7 @@ class CILTrainer:
 
             preds = torch.argmax(cls_score, dim=1, keepdim=False)
             acc = metric(preds, labels)
-            accuracies.append(acc.item())
+            accuracies.append(acc.item() * 100)
         print('Accuracy across task:', accuracies)
         return accuracies
 

@@ -5,10 +5,15 @@ gpu_ids = [0]
 # videos_per_gpu = 12   # 8 gpus x 12 videos (single gpu setting)
 # workers_per_gpu = 2   # 8 gpu setting
 
-# single gpu setting
+# single gpu setting for traning
 videos_per_gpu = 96
 workers_per_gpu = 12
 accumulate_grad_batches = 1
+
+# single gpu setting for testing
+testing_videos_per_gpu = 1
+testing_workers_per_gpu = 2
+
 work_dir = './work_dirs/test/'
 
 
