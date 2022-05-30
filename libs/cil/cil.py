@@ -18,6 +18,7 @@ import pytorch_lightning as pl
 from torchmetrics.classification import Accuracy
 
 from .memory_selection import Herding
+from ..utils import print_mean_accuracy
 
 
 class CILDataModule(pl.LightningDataModule):
@@ -50,6 +51,7 @@ class CILDataModule(pl.LightningDataModule):
         self.task_splits_ann_files = {'train': [], 'val': []}
         self.train_dataset = None
         self.val_datasets = []
+        self.test_datasets = []
         self.features_extraction_dataset = None
         self.exemplar_datasets = []
 
@@ -128,6 +130,14 @@ class CILDataModule(pl.LightningDataModule):
     # avoid override val_dataloader abstract method
     def get_val_dataloader(self, task_idx: int):
         return DataLoader(self.val_datasets[task_idx],
+                          batch_size=self.batch_size,
+                          num_workers=self.config.workers_per_gpu,
+                          pin_memory=True,
+                          shuffle=False
+                          )
+
+    def get_test_dataloader(self, task_idx: int):
+        return DataLoader(self.test_datasets[task_idx],
                           batch_size=self.batch_size,
                           num_workers=self.config.workers_per_gpu,
                           pin_memory=True,
@@ -457,7 +467,7 @@ class CILTrainer:
         }
         return collated_prediction_with_meta
 
-    def _testing(self):
+    def _testing(self, use_validation_set=True):
         print('Begin testing')
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
@@ -467,9 +477,13 @@ class CILTrainer:
         self.cil_model.extract_repr = False
         metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes, multiclass=True)
 
-        accumulate_acc = []
+        accuracies = []
         for task_idx in range(self.current_task + 1):
-            loader = self.data_module.get_val_dataloader(task_idx)
+            if use_validation_set:
+                loader = self.data_module.get_val_dataloader(task_idx)
+            else:
+                loader = self.data_module.get_test_dataloader(task_idx)
+
             pred_ = trainer.predict(model=self.cil_model,
                                     dataloaders=loader)
             # collate data
@@ -482,6 +496,25 @@ class CILTrainer:
             labels = torch.stack(labels, dim=0)
 
             preds = torch.argmax(cls_score, dim=1, keepdim=False)
-            accuracy = metric(preds, labels)
-            accumulate_acc.append(accuracy.item())
-        print('Accuracy across task:', accumulate_acc)
+            acc = metric(preds, labels)
+            accuracies.append(acc.item())
+        print('Accuracy across task:', accuracies)
+        return accuracies
+
+    def cil_testing(self):
+        tmp = self._current_task
+        self.data_module.val_datasets = []
+        all_task_accuracies = []
+        for taskIdx in range(self.num_tasks):
+            self._current_task = taskIdx
+            self.data_module.config.data.test.ann_file = str(self.data_module.task_splits_ann_files['val'][self.current_task])
+            self.data_module.test_datasets.append(build_dataset(self.config.data.test))
+
+            self.cil_model.current_model.update_fc(self.num_classes)
+            self.cil_model.current_model.load_state_dict(
+                torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task))
+            )
+            task_i_accuracies = self._testing(use_validation_set=False)
+            all_task_accuracies.append(task_i_accuracies)
+        self._current_task = tmp    # reset state
+        print(print_mean_accuracy(all_task_accuracies, [len(class_indices) for class_indices in self.task_splits]))
