@@ -30,7 +30,7 @@ task_splits = [[37, 97, 56, 55, 33, 84, 3, 4, 72, 59, 66,
 
 # select one of ['base', 'oracle', 'finetune']
 methods = 'base'
-
+starting_task = 0
 use_nme_classifier = False
 budget_size = 5
 storing_methods = 'videos'
