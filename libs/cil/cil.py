@@ -43,7 +43,6 @@ class CILDataModule(pl.LightningDataModule):
                 if i not in self.ori_idx_to_inc_idx:
                     self.ori_idx_to_inc_idx[i] = len(self.ori_idx_to_inc_idx)
 
-        # set exist_ok=False to avoid accidentally overriding the previous experiment result
         self.work_dir.mkdir(exist_ok=True, parents=True)
         self.exemplar_dir = self.work_dir / 'exemplar'
         self.exemplar_dir.mkdir(exist_ok=True, parents=True)
@@ -56,10 +55,13 @@ class CILDataModule(pl.LightningDataModule):
         self.features_extraction_dataset = None
         self.exemplar_datasets = []
 
-
     @property
     def current_task(self):
         return self.controller.current_task
+
+    @property
+    def num_tasks(self):
+        return self.controller.num_tasks
 
     @property
     def exemplar_size(self):
@@ -102,18 +104,38 @@ class CILDataModule(pl.LightningDataModule):
                     self.task_splits_ann_files[train_val].append(task_i_file_path)
                     print('create file at:', str(task_i_file_path))
 
-    def reload_dataset(self,
-                       exemplar: Optional[Union[RawframeDataset, List[RawframeDataset]]]=None,
-                       use_internal_exemplar=True):
+    def collect_ann_files_from_work_dir(self):
+        ann_files_dir = self.work_dir / 'task_splits'
+        for task_i in range(self.num_tasks):
+            self.task_splits_ann_files['train'].append(
+                ann_files_dir / self.config.cil_ann_file_template.format('train', task_i))
+
+            self.task_splits_ann_files['val'].append(
+                ann_files_dir / self.config.cil_ann_file_template.format('val', task_i))
+
+    def collect_exemplar_fron_work_dir(self):
+        for task_idx in range(self.current_task):
+            ann_file = self.exemplar_dir / 'exemplar_task_{}.txt'.format(task_idx)
+            exemplar_dataset = self.build_exemplar_dataset(str(ann_file))
+            self.exemplar_datasets.append(exemplar_dataset)
+
+    def build_validation_datasets(self):
+        for i in range(self.num_tasks):
+            self.config.data.val.ann_file = str(self.task_splits_ann_files['val'][i])
+            self.val_datasets.append(build_dataset(self.config.data.val))
+
+    def reload_train_dataset(self,
+                             exemplar: Optional[Union[RawframeDataset, List[RawframeDataset]]] = None,
+                             use_internal_exemplar=True):
         """
-        this method should be used for reloading the train_dataset and val_dataset when moving to next task
+        this method should be used for reloading the train_dataset when moving to next task
         Note: the self.controller.current_task should be updated with new value before calling this method
         """
         self.config.data.train.ann_file = str(self.task_splits_ann_files['train'][self.current_task])
         self.train_dataset = build_dataset(self.config.data.train)
 
-        self.config.data.val.ann_file = str(self.task_splits_ann_files['val'][self.current_task])
-        self.val_datasets.append(build_dataset(self.config.data.val))
+        # self.config.data.val.ann_file = str(self.task_splits_ann_files['val'][self.current_task])
+        # self.val_datasets.append(build_dataset(self.config.data.val))
 
         if use_internal_exemplar:
             self.train_dataset = self.merge_dataset(self.train_dataset, self.exemplar_datasets)
@@ -316,8 +338,8 @@ class CILTrainer:
         self.work_dir = pathlib.Path(config.work_dir)
 
         # class incremental learning setting
-        self.starting_task = 0
-        self.ending_task = 0
+        self.starting_task = config.starting_task
+        # self.ending_task = 0
         self._current_task = self.starting_task
         self.num_epoch_per_task = config.num_epochs_per_task
         self.task_splits = config.task_splits
@@ -326,16 +348,37 @@ class CILTrainer:
 
         self.data_module = CILDataModule(config)
         self.data_module.controller = self
-        self.data_module.generate_annotation_file()
-        self.data_module.reload_dataset(exemplar=None, use_internal_exemplar=False)
         self.cil_model = BaseCIL(config)
         self.cil_model.controller = self
 
         self.ckpt_dir = self.work_dir / 'ckpt'
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
-        self.config.dump(self.work_dir / 'config.py')
 
-    # properties
+        if self.starting_task == 0:
+            self.data_module.generate_annotation_file()
+            self.config.dump(self.work_dir / 'config.py')
+            self.data_module.reload_train_dataset(exemplar=None, use_internal_exemplar=False)
+
+        # resume training
+        else:
+            self.data_module.collect_ann_files_from_work_dir()
+            self.data_module.collect_exemplar_fron_work_dir()
+
+            # roll back to previous task_idx to load the check
+            self._current_task -= 1
+            self.cil_model.current_model.update_fc(self.num_classes)
+            self.cil_model.current_model.load_state_dict(
+                torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)))
+            self.cil_model.prev_model.load_state_dict(self.cil_model.current_model.state_dict())
+            self.cil_model.prev_model.eval()
+
+            # back to starting task update the classifier
+            self._current_task += 1
+            self.cil_model.current_model.update_fc(self.num_classes)
+            self.data_module.reload_train_dataset(use_internal_exemplar=True)
+
+        self.data_module.build_validation_datasets()
+
     @property
     def current_task(self):
         return self._current_task
@@ -346,7 +389,7 @@ class CILTrainer:
 
     @property
     def val_dataset(self):
-        return self.data_module.val_dataset
+        return self.data_module.val_datasets[self._current_task]
 
     @property
     def num_classes(self):
@@ -362,6 +405,9 @@ class CILTrainer:
         trainer.fit(self.cil_model, self.data_module)
 
     def train_cbf(self):
+        pass
+
+    def _resume(self):
         pass
 
     def train(self):
@@ -408,16 +454,16 @@ class CILTrainer:
                 self.cil_model.prev_model.update_fc(self.num_classes)
 
                 # 3. prepare data for next task and update model
-                self.data_module.reload_dataset(use_internal_exemplar=True)
+                self.data_module.reload_train_dataset(use_internal_exemplar=True)
             print('#####################################################################################\n')
 
     def print_task_info(self):
         print('Task {}, current heads: {}\n'
               'Training set size: {} (including {} samples from exemplar)'.format(self._current_task,
-                                               self.num_classes,
-                                               len(self.data_module.train_dataset),
-                                               self.data_module.exemplar_size,
-                                               ))
+                                                                                  self.num_classes,
+                                                                                  len(self.data_module.train_dataset),
+                                                                                  self.data_module.exemplar_size,
+                                                                                  ))
 
     def _extract_features_for_constructing_exemplar(self):
         """
@@ -505,11 +551,11 @@ class CILTrainer:
 
     def cil_testing(self):
         tmp = self._current_task
-        self.data_module.val_datasets = []
         all_task_accuracies = []
         for taskIdx in range(self.num_tasks):
             self._current_task = taskIdx
-            self.data_module.config.data.test.ann_file = str(self.data_module.task_splits_ann_files['val'][self.current_task])
+            self.data_module.config.data.test.ann_file = str(
+                self.data_module.task_splits_ann_files['val'][self.current_task])
             self.data_module.test_datasets.append(build_dataset(self.config.data.test))
 
             self.cil_model.current_model.update_fc(self.num_classes)
@@ -518,5 +564,5 @@ class CILTrainer:
             )
             task_i_accuracies = self._testing(use_validation_set=False)
             all_task_accuracies.append(task_i_accuracies)
-        self._current_task = tmp    # reset state
+        self._current_task = tmp  # reset state
         print(print_mean_accuracy(all_task_accuracies, [len(class_indices) for class_indices in self.task_splits]))

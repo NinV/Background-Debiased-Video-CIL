@@ -13,23 +13,28 @@ def parse_args():
 
     # other configs
     parser.add_argument('--work_dir', help='the dir to save logs and models')
-    parser.add_argument('--videos_per_gpu', type=int, help='the dir to save logs and models')
-    parser.add_argument('--workers_per_gpu', type=int, help='the dir to save logs and models')
-    parser.add_argument('--accumulate_grad_batches', type=int, help='the dir to save logs and models')
+    parser.add_argument('--videos_per_gpu', type=int)
+    parser.add_argument('--workers_per_gpu', type=int)
+    parser.add_argument('--accumulate_grad_batches', type=int)
 
     parser.add_argument('--gpu_ids', type=int, nargs='*', help='ids of gpus to use')
+    parser.add_argument(
+        '--starting_task', default=0, type=int,
+        help='start training from selected i-th task. Previous checkpoint and other necessities will '
+             'be loaded from work_dir')
     args = parser.parse_args()
 
+    # cfg_dict are used for updating the configurations from config file
     cfg_dict = {}
     for k, v in vars(args).items():
-        if v is not None and k!= 'config':
+        if v is not None and k != 'config':
             cfg_dict[k] = v
     return args, cfg_dict
 
 
 def main():
     import logging
-    logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)    # disable some redundant warning
+    logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)  # disable some redundant warning
 
     args, cfg_dict = parse_args()
     config = Config.fromfile(args.config)
