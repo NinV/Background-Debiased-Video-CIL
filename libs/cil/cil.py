@@ -333,6 +333,7 @@ class CILTrainer:
 
         self.ckpt_dir = self.work_dir / 'ckpt'
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
+        self.config.dump(self.work_dir / 'config.py')
 
     # properties
     @property

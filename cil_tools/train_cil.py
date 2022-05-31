@@ -10,18 +10,30 @@ import libs
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a recognizer')
     parser.add_argument('config', help='train config file path')
-    parser.add_argument('--work-dir', help='the dir to save logs and models')
-    # parser.add_argument('--resume-from', help='the checkpoint file to resume from')
+
+    # other configs
+    parser.add_argument('--work_dir', help='the dir to save logs and models')
+    parser.add_argument('--videos_per_gpu', type=int, help='the dir to save logs and models')
+    parser.add_argument('--workers_per_gpu', type=int, help='the dir to save logs and models')
+    parser.add_argument('--accumulate_grad_batches', type=int, help='the dir to save logs and models')
+
+    parser.add_argument('--gpu_ids', type=int, nargs='*', help='ids of gpus to use')
     args = parser.parse_args()
-    return args
+
+    cfg_dict = {}
+    for k, v in vars(args).items():
+        if v is not None and k!= 'config':
+            cfg_dict[k] = v
+    return args, cfg_dict
 
 
 def main():
     import logging
     logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)    # disable some redundant warning
 
-    args = parse_args()
+    args, cfg_dict = parse_args()
     config = Config.fromfile(args.config)
+    config.merge_from_dict(cfg_dict)
     trainer = CILTrainer(config)
     trainer.train()
 
