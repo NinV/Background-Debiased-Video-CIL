@@ -364,7 +364,7 @@ class CILTrainer:
             self.data_module.collect_ann_files_from_work_dir()
             self.data_module.collect_exemplar_fron_work_dir()
 
-            # roll back to previous task_idx to load the check
+            # roll back to previous task_idx to load weights
             self._current_task -= 1
             self.cil_model.current_model.update_fc(self.num_classes)
             self.cil_model.current_model.load_state_dict(
@@ -375,6 +375,7 @@ class CILTrainer:
             # back to starting task update the classifier
             self._current_task += 1
             self.cil_model.current_model.update_fc(self.num_classes)
+            self.cil_model.prev_model.update_fc(self.num_classes)
             self.data_module.reload_train_dataset(use_internal_exemplar=True)
 
         self.data_module.build_validation_datasets()
