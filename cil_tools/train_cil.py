@@ -22,6 +22,8 @@ def parse_args():
         '--starting_task', default=0, type=int,
         help='start training from selected i-th task. Previous checkpoint and other necessities will '
              'be loaded from work_dir')
+    parser.add_argument('--use_cbf', action='store_true', help='Use Class Balance Finetune (CBF')
+    parser.add_argument('--cbf_train_backbone', action='store_true', help='Unfreeze backbone when in CBF mode')
     args = parser.parse_args()
 
     # cfg_dict are used for updating the configurations from config file

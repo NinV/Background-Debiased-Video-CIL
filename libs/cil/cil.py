@@ -415,7 +415,7 @@ class CILTrainer:
 
     def train_cbf(self):
         # self.cil_model.current_model.freeze_backbone()
-        print('Class Balance Fine-tuning')
+        print('Class Balance Fine-tuning. Freeze backbone: {}'.format(not self.config.cbf_train_backbone))
         cbf_dataset = self.data_module.build_cbf_dataset()
         loader = DataLoader(cbf_dataset,
                             batch_size=self.config.videos_per_gpu,
@@ -428,7 +428,13 @@ class CILTrainer:
                              max_epochs=self.config.num_epochs_per_task,
                              accumulate_grad_batches=self.config.accumulate_grad_batches
                              )
-        trainer.fit(self.cil_model, loader)
+
+        if self.config.cbf_train_backbone:
+            trainer.fit(self.cil_model, loader)
+        else:
+            self.cil_model.current_model.freeze_backbone()
+            trainer.fit(self.cil_model, loader)
+            self.cil_model.current_model.unfreeze_backbone()
 
     def _resume(self):
         pass
@@ -452,7 +458,7 @@ class CILTrainer:
             self.data_module.build_exemplar_from_current_task(exemplar_meta)
 
             # train cbf (optional)
-            if self._current_task > 0:
+            if self._current_task > 0 and self.config.use_cbf:
                 self.train_cbf()
 
             # testing
