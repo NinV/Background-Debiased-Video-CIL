@@ -124,6 +124,12 @@ class CILDataModule(pl.LightningDataModule):
             self.config.data.val.ann_file = str(self.task_splits_ann_files['val'][i])
             self.val_datasets.append(build_dataset(self.config.data.val))
 
+    def build_cbf_dataset(self):
+        dataset = build_dataset(self.config.data.train)  # TODO: create a exemplar data pipeline in config file
+        dataset.video_infos = []
+        dataset = self.merge_dataset(dataset, self.exemplar_datasets)
+        return dataset
+
     def reload_train_dataset(self,
                              exemplar: Optional[Union[RawframeDataset, List[RawframeDataset]]] = None,
                              use_internal_exemplar=True):
@@ -333,7 +339,7 @@ class BaseCIL(pl.LightningModule):
 
 
 class CILTrainer:
-    def __init__(self, config):
+    def __init__(self, config, dump_config=True):
         self.config = config
         self.work_dir = pathlib.Path(config.work_dir)
 
@@ -356,7 +362,6 @@ class CILTrainer:
 
         if self.starting_task == 0:
             self.data_module.generate_annotation_file()
-            self.config.dump(self.work_dir / 'config.py')
             self.data_module.reload_train_dataset(exemplar=None, use_internal_exemplar=False)
 
         # resume training
@@ -379,6 +384,9 @@ class CILTrainer:
             self.data_module.reload_train_dataset(use_internal_exemplar=True)
 
         self.data_module.build_validation_datasets()
+
+        if dump_config:
+            self.config.dump(self.work_dir / 'config.py')
 
     @property
     def current_task(self):
@@ -406,7 +414,21 @@ class CILTrainer:
         trainer.fit(self.cil_model, self.data_module)
 
     def train_cbf(self):
-        pass
+        # self.cil_model.current_model.freeze_backbone()
+        print('Class Balance Fine-tuning')
+        cbf_dataset = self.data_module.build_cbf_dataset()
+        loader = DataLoader(cbf_dataset,
+                            batch_size=self.config.videos_per_gpu,
+                            num_workers=self.config.workers_per_gpu,
+                            pin_memory=True,
+                            shuffle=True)
+
+        trainer = pl.Trainer(gpus=self.config.gpu_ids,
+                             default_root_dir=self.config.work_dir,
+                             max_epochs=self.config.num_epochs_per_task,
+                             accumulate_grad_batches=self.config.accumulate_grad_batches
+                             )
+        trainer.fit(self.cil_model, loader)
 
     def _resume(self):
         pass
@@ -430,7 +452,8 @@ class CILTrainer:
             self.data_module.build_exemplar_from_current_task(exemplar_meta)
 
             # train cbf (optional)
-            self.train_cbf()
+            if self._current_task > 0:
+                self.train_cbf()
 
             # testing
             self._testing()
