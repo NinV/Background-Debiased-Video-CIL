@@ -20,3 +20,11 @@ class CILRecognizer2D(Recognizer2D):
         update the classifier with more classes
         """
         self.cls_head.update_fc(nb_classes)
+
+    def freeze_backbone(self):
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+    def unfreeze_backbone(self):
+        for param in self.backbone.parameters():
+            param.requires_grad = True
