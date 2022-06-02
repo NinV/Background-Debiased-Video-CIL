@@ -10,6 +10,7 @@ import libs
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a recognizer')
     parser.add_argument('config', help='train config file path')
+    parser.add_argument('--work_dir', help='the dir to save logs and models')
 
     # other configs
     parser.add_argument('--testing_videos_per_gpu', type=int)
