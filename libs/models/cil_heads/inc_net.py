@@ -13,8 +13,6 @@ class BaseNet(nn.Module, ABC):
 
 
 class IncrementalNet(BaseNet):
-    # def __init__(self, in_features):
-    #     super().__init__(in_features)
     def update_fc(self, nb_classes):
         fc = self._generate_fc(self.in_features, nb_classes)
         if self.fc is not None:
@@ -51,7 +49,6 @@ class CosineIncrementalNet(BaseNet):
     def __init__(self, in_features, nb_proxy=1):
         super().__init__(in_features)
         self.nb_proxy = nb_proxy
-
 
     def update_fc(self, nb_classes):
         fc = self._generate_fc(self.in_features, nb_classes)
