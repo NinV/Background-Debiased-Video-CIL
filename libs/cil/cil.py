@@ -19,6 +19,7 @@ from torchmetrics.classification import Accuracy
 
 from .memory_selection import Herding
 from ..utils import print_mean_accuracy
+from ..loader.comix_loader import BackgroundMixDataset
 
 
 class CILDataModule(pl.LightningDataModule):
@@ -127,6 +128,8 @@ class CILDataModule(pl.LightningDataModule):
     def build_cbf_dataset(self):
         dataset = build_dataset(self.config.data.train)  # TODO: create a exemplar data pipeline in config file
         dataset.video_infos = []
+        if isinstance(dataset, BackgroundMixDataset):
+            dataset.bg_files = []
         dataset = self.merge_dataset(dataset, self.exemplar_datasets)
         return dataset
 
@@ -209,16 +212,35 @@ class CILDataModule(pl.LightningDataModule):
         exemplar_dataset = self.build_exemplar_dataset(ann_file)
         self.exemplar_datasets.append(exemplar_dataset)
 
-    @staticmethod
-    def merge_dataset(source: RawframeDataset, targets: Union[RawframeDataset, List[RawframeDataset]]):
+    def merge_dataset(self, source: RawframeDataset, targets: Union[RawframeDataset, List[RawframeDataset]]):
         """
         copy data info from target then merge to source. This method is useful
         """
-        if isinstance(targets, RawframeDataset):
-            source.video_infos.extend(targets.video_infos)
-        else:
+
+        # if isinstance(targets, RawframeDataset):
+        #     source.video_infos.extend(targets.video_infos)
+        # else:
+        #     for target_ in targets:
+        #         source.video_infos.extend(target_.video_infos)
+        if isinstance(targets, list):
             for target_ in targets:
-                source.video_infos.extend(target_.video_infos)
+                source = self._merge_dataset(source, target_)
+        else:
+            source = self._merge_dataset(source, targets)
+        return source
+
+    @staticmethod
+    def _merge_dataset(source: RawframeDataset, target_: Union[RawframeDataset, List[RawframeDataset]]):
+        if type(source) != type(target_):
+            raise ValueError('source and target must be the same type ')
+
+        if isinstance(source, BackgroundMixDataset):
+            source.video_infos.extend(target_.video_infos)
+            source.bg_files.extend(target_.bg_files)
+        elif isinstance(source, RawframeDataset):
+            source.video_infos.extend(target_.video_infos)
+        else:
+            raise TypeError
         return source
 
 
@@ -292,7 +314,10 @@ class BaseCIL(pl.LightningModule):
     def training_step(self, batch_data, batch_idx):
         # x.shape = (batch_size, channels, T, H, W)
         imgs, labels = batch_data['imgs'], batch_data['label']
-        losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
+        if 'blended' in batch_data:
+            losses = self.current_model(imgs, labels, mixed_bg=batch_data['blended'])
+        else:
+            losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
 
         if self.use_kd and self.current_task > 0:
             kd_loss = 0
@@ -311,10 +336,15 @@ class BaseCIL(pl.LightningModule):
 
         loss = losses['loss_cls'] + losses['kd_loss']
         batch_size = imgs.shape[0]
-        self.log('train_loss_cls', losses['loss_cls'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
+
+        for loss_name, loss_value in losses.items():
+            self.log('train_' + loss_name, losses[loss_name], on_step=True, on_epoch=True, prog_bar=True, logger=True,
                  batch_size=batch_size)
-        self.log('train_loss_kd', losses['kd_loss'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
-                 batch_size=batch_size)
+
+        # self.log('train_loss_cls', losses['loss_cls'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
+        #          batch_size=batch_size)
+        # self.log('train_loss_kd', losses['kd_loss'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
+        #          batch_size=batch_size)
         return loss
 
     def predict_step(self, batch_data, batch_idx, dataloader_idx: Optional[int] = None):
