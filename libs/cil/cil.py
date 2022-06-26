@@ -334,13 +334,14 @@ class BaseCIL(pl.LightningModule):
         else:
             losses['kd_loss'] = 0.
 
-        loss = losses['loss_cls'] + losses['kd_loss']
+        # loss = losses['loss_cls'] + losses['kd_loss']
+        loss = 0
         batch_size = imgs.shape[0]
-
         for loss_name, loss_value in losses.items():
             self.log('train_' + loss_name, losses[loss_name], on_step=True, on_epoch=True, prog_bar=True, logger=True,
                  batch_size=batch_size)
 
+            loss = loss + losses[loss_name]
         # self.log('train_loss_cls', losses['loss_cls'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
         #          batch_size=batch_size)
         # self.log('train_loss_kd', losses['kd_loss'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
