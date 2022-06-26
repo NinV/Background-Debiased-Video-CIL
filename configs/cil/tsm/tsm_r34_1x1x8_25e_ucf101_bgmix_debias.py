@@ -37,7 +37,7 @@ cbf_train_backbone = False
 budget_size = 5
 storing_methods = 'videos'
 budget_type = 'class'
-num_epochs_per_task = 1
+num_epochs_per_task = 50
 
 # mmaction2 model config
 # model settings
