@@ -123,7 +123,9 @@ class CILDataModule(pl.LightningDataModule):
     def build_validation_datasets(self):
         for i in range(self.num_tasks):
             self.config.data.val.ann_file = str(self.task_splits_ann_files['val'][i])
-            self.val_datasets.append(build_dataset(self.config.data.val))
+            val_ds = build_dataset(self.config.data.val)
+            val_ds.test_mode = True
+            self.val_datasets.append(val_ds)
 
     def build_cbf_dataset(self):
         dataset = build_dataset(self.config.data.train)  # TODO: create a exemplar data pipeline in config file
