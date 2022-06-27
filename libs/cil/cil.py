@@ -592,8 +592,10 @@ class CILTrainer:
         for task_idx in range(self.current_task + 1):
             if use_validation_set:
                 loader = self.data_module.get_val_dataloader(task_idx)
+                loader.dataset.test_mode = True
             else:
                 loader = self.data_module.get_test_dataloader(task_idx)
+                loader.dataset.test_mode = True
 
             pred_ = trainer.predict(model=self.cil_model,
                                     dataloaders=loader)
