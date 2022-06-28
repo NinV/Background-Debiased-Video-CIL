@@ -320,7 +320,6 @@ class BaseCIL(pl.LightningModule):
             losses = self.current_model(imgs, labels, mixed_bg=batch_data['blended'])
         else:
             losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
-
         if self.use_kd and self.current_task > 0:
             kd_loss = 0
             kd_criterion = nn.MSELoss()
@@ -337,13 +336,15 @@ class BaseCIL(pl.LightningModule):
             losses['kd_loss'] = 0.
 
         # loss = losses['loss_cls'] + losses['kd_loss']
-        loss = 0
+        # loss = 0
         batch_size = imgs.shape[0]
         for loss_name, loss_value in losses.items():
             self.log('train_' + loss_name, losses[loss_name], on_step=True, on_epoch=True, prog_bar=True, logger=True,
                  batch_size=batch_size)
 
-            loss = loss + losses[loss_name]
+        loss = losses['kd_loss'] + losses['loss_cls']
+        if 'loss_bg_mixed' in losses:
+            loss += losses['loss_bg_mixed']
         # self.log('train_loss_cls', losses['loss_cls'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
         #          batch_size=batch_size)
         # self.log('train_loss_kd', losses['kd_loss'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
