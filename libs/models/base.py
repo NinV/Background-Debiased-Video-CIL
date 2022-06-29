@@ -39,6 +39,7 @@ class CILBGMixedRecognizer2D(CILRecognizer2D):
                  cls_head=None,
                  neck=None,
                  bg_mixed_head=None,
+                 prob=0.5,
                  train_cfg=None,
                  test_cfg=None):
         super().__init__(backbone,
@@ -49,7 +50,7 @@ class CILBGMixedRecognizer2D(CILRecognizer2D):
 
         self.bg_mixed_head = build_head(bg_mixed_head) if bg_mixed_head else None
         self.contrastive = False
-        self.prob = 0.5
+        self.prob = prob
 
     def forward_train(self, imgs, labels, mixed_bg, **kwargs):
         """Defines the computation performed at every call when training."""
@@ -91,7 +92,7 @@ class CILBGMixedRecognizer2D(CILRecognizer2D):
             losses.update({'loss_bg_mixed': loss_bg_mixed})
             return losses
 
-        if random.random() > self.prob:
+        if random.random() < self.prob:
             return super().forward_train(mixed_bg, labels)
         else:
             return super().forward_train(imgs, labels)
