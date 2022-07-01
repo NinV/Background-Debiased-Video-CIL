@@ -117,8 +117,11 @@ class CILDataModule(pl.LightningDataModule):
     def collect_exemplar_fron_work_dir(self):
         for task_idx in range(self.current_task):
             ann_file = self.exemplar_dir / 'exemplar_task_{}.txt'.format(task_idx)
-            exemplar_dataset = self.build_exemplar_dataset(str(ann_file))
-            self.exemplar_datasets.append(exemplar_dataset)
+            if ann_file.exists():
+                exemplar_dataset = self.build_exemplar_dataset(str(ann_file))
+                self.exemplar_datasets.append(exemplar_dataset)
+            else:
+                raise FileNotFoundError
 
     def build_validation_datasets(self):
         for i in range(self.num_tasks):
@@ -401,7 +404,23 @@ class CILTrainer:
         # resume training
         else:
             self.data_module.collect_ann_files_from_work_dir()
-            self.data_module.collect_exemplar_fron_work_dir()
+            try:
+                self.data_module.collect_exemplar_fron_work_dir()
+            except FileNotFoundError:
+                for i in range(len(self.data_module.exemplar_datasets), self.starting_task):
+                    self._current_task = i
+                    print('Create exemplar for task {}'.format(i))
+                    class_indices = [self.data_module.ori_idx_to_inc_idx[idx] for idx in
+                                     self.task_splits[self.current_task]]
+                    manager = Herding(budget_size=self.config.budget_size,
+                                      class_indices=class_indices,
+                                      cosine_distance=True,
+                                      storing_methods=self.config.storing_methods,
+                                      budget_type=self.config.budget_type)
+                    prediction_with_meta = self._extract_features_for_constructing_exemplar()
+                    exemplar_meta = manager.construct_exemplar(prediction_with_meta)
+                    self.data_module.build_exemplar_from_current_task(exemplar_meta)
+                self._current_task = self.starting_task
 
             # roll back to previous task_idx to load weights
             self._current_task -= 1
