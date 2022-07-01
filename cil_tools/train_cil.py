@@ -24,6 +24,7 @@ def parse_args():
              'be loaded from work_dir')
     parser.add_argument('--use_cbf', action='store_true', help='Use Class Balance Finetune (CBF')
     parser.add_argument('--cbf_train_backbone', action='store_true', help='Unfreeze backbone when in CBF mode')
+    parser.add_argument('--budget_size', type=int)
     args = parser.parse_args()
 
     # cfg_dict are used for updating the configurations from config file
