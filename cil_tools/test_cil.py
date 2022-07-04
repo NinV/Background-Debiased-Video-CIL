@@ -31,6 +31,7 @@ def main():
     args, cfg_dict = parse_args()
     config = Config.fromfile(args.config)
     config.merge_from_dict(cfg_dict)
+    config.starting_task = 0
     trainer = CILTrainer(config, dump_config=False)
     trainer.cil_testing()
 
