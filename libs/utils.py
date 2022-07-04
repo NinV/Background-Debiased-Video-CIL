@@ -1,4 +1,6 @@
 import numpy as np
+import torch.optim.optimizer
+from mmcv.utils.config import Config as mmcvConfig
 from tabulate import tabulate
 
 
@@ -25,6 +27,17 @@ def print_mean_accuracy(accuracies, num_classes_per_task, floatfmt=".2f"):
     avg_acc = np.mean(avg_acc)
     table.append(['avg_acc'] + num_tasks * [None] + [avg_acc])
     return tabulate(table, headers=headers, floatfmt=[floatfmt] * 8, missingval='')
+
+
+def build_lr_scheduler(optimizer, config: mmcvConfig):
+    from torch.optim.lr_scheduler import MultiStepLR, StepLR, LinearLR, ExponentialLR
+    scheduler_types = {'StepLR': StepLR,
+                       'MultiStepLR': MultiStepLR,
+                       'LinearLR': LinearLR,
+                       'ExponentialLR': ExponentialLR}
+    constructor = scheduler_types[config.type]
+    lr_scheduler = constructor(optimizer, **config['params'])
+    return lr_scheduler
 
 
 if __name__ == '__main__':

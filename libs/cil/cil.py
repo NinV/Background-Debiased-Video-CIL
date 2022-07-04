@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import StepLR, MultiStepLR
 from mmcv.runner import build_optimizer
 from mmcv.utils.config import Config as mmcvConfig
 from mmaction.datasets import build_dataset, RawframeDataset
@@ -16,9 +17,10 @@ from mmaction.models import build_model
 from ..module_hooks import OutputHook
 import pytorch_lightning as pl
 from torchmetrics.classification import Accuracy
+from pytorch_lightning.callbacks import LearningRateMonitor
 
 from .memory_selection import Herding
-from ..utils import print_mean_accuracy
+from ..utils import print_mean_accuracy, build_lr_scheduler
 from ..loader.comix_loader import BackgroundMixDataset
 
 
@@ -298,9 +300,29 @@ class BaseCIL(pl.LightningModule):
         self._repr_module_name = config.repr_hook
         self._repr_hook = self.register_modules_hooks(self.current_model, [self._repr_module_name])
 
+        # optimizers
+        self.optimizer_mode = 'default'         # ['default', 'cbf']
+
     # initialization
     def configure_optimizers(self):
-        optimizer = build_optimizer(self.current_model, self.config.optimizer)
+        if self.optimizer_mode == 'default':
+            print('build optimizer for incremental training')
+            optimizer_config = self.config.optimizer
+            lr_scheduler_config = self.config.lr_scheduler
+        elif self.optimizer_mode == 'cbf':
+            print('build optimizer for CBF training')
+            optimizer_config = self.config.cbf_optimizer
+            lr_scheduler_config = self.config.cbf_lr_scheduler
+
+        else:
+            raise ValueError
+
+        optimizer = build_optimizer(self.current_model, optimizer_config)
+        if lr_scheduler_config:
+            return {
+                    'optimizer': optimizer,
+                    'lr_scheduler': build_lr_scheduler(optimizer, lr_scheduler_config),
+                    }
         return optimizer
 
     @staticmethod
@@ -382,6 +404,9 @@ class BaseCIL(pl.LightningModule):
         return {'cls_score': cls_score,
                 'label': batch_data['label']
                 }
+
+    # def on_epoch_start(self) -> None:
+    #     print(self.optimizers())
 
 
 class CILTrainer:
@@ -467,11 +492,13 @@ class CILTrainer:
         return self.data_module.num_classes_per_task[self.current_task]
 
     def train_task(self):
+        # lr_monitor = LearningRateMonitor(logging_interval='step')
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.num_epochs_per_task,
                              # limit_train_batches=10,
-                             accumulate_grad_batches=self.config.accumulate_grad_batches
+                             accumulate_grad_batches=self.config.accumulate_grad_batches,
+                             # callbacks=[lr_monitor]
                              )
         trainer.fit(self.cil_model, self.data_module)
 
@@ -487,16 +514,17 @@ class CILTrainer:
 
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
-                             max_epochs=self.config.num_epochs_per_task,
+                             max_epochs=self.config.cbf_num_epochs_per_task,
                              accumulate_grad_batches=self.config.accumulate_grad_batches
                              )
-
+        self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
             trainer.fit(self.cil_model, loader)
         else:
             self.cil_model.current_model.freeze_backbone()
             trainer.fit(self.cil_model, loader)
             self.cil_model.current_model.unfreeze_backbone()
+        self.cil_model.optimizer_mode = 'default'
 
     def _resume(self):
         pass
