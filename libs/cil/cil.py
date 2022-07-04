@@ -461,6 +461,7 @@ class CILTrainer:
             self.cil_model.current_model.update_fc(self.num_classes)
             self.cil_model.current_model.load_state_dict(
                 torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)))
+            self.cil_model.prev_model.update_fc(self.num_classes)
             self.cil_model.prev_model.load_state_dict(self.cil_model.current_model.state_dict())
             self.cil_model.prev_model.eval()
 
