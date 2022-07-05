@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import StepLR, MultiStepLR
 from mmcv.runner import build_optimizer
 from mmcv.utils.config import Config as mmcvConfig
 from mmaction.datasets import build_dataset, RawframeDataset
@@ -16,9 +17,10 @@ from mmaction.models import build_model
 from ..module_hooks import OutputHook
 import pytorch_lightning as pl
 from torchmetrics.classification import Accuracy
+from pytorch_lightning.callbacks import LearningRateMonitor
 
 from .memory_selection import Herding
-from ..utils import print_mean_accuracy
+from ..utils import print_mean_accuracy, build_lr_scheduler
 from ..loader.comix_loader import BackgroundMixDataset
 
 
@@ -117,8 +119,11 @@ class CILDataModule(pl.LightningDataModule):
     def collect_exemplar_fron_work_dir(self):
         for task_idx in range(self.current_task):
             ann_file = self.exemplar_dir / 'exemplar_task_{}.txt'.format(task_idx)
-            exemplar_dataset = self.build_exemplar_dataset(str(ann_file))
-            self.exemplar_datasets.append(exemplar_dataset)
+            if ann_file.exists():
+                exemplar_dataset = self.build_exemplar_dataset(str(ann_file))
+                self.exemplar_datasets.append(exemplar_dataset)
+            else:
+                raise FileNotFoundError
 
     def build_validation_datasets(self):
         for i in range(self.num_tasks):
@@ -132,7 +137,16 @@ class CILDataModule(pl.LightningDataModule):
         dataset.video_infos = []
         if isinstance(dataset, BackgroundMixDataset):
             dataset.bg_files = []
-        dataset = self.merge_dataset(dataset, self.exemplar_datasets)
+            dataset = self.merge_dataset(dataset, self.exemplar_datasets)
+            all_bg_files_ = set(self.train_dataset.bg_files) | set(dataset.bg_files)
+            dataset.bg_files = list(all_bg_files_)
+            print('CBF dataset built ({} videos, {} background)'.format(len(dataset), len(dataset.bg_files)))
+
+        elif isinstance(dataset, RawframeDataset):
+            dataset = self.merge_dataset(dataset, self.exemplar_datasets)
+
+        else:
+            raise NotImplementedError
         return dataset
 
     def reload_train_dataset(self,
@@ -286,9 +300,29 @@ class BaseCIL(pl.LightningModule):
         self._repr_module_name = config.repr_hook
         self._repr_hook = self.register_modules_hooks(self.current_model, [self._repr_module_name])
 
+        # optimizers
+        self.optimizer_mode = 'default'         # ['default', 'cbf']
+
     # initialization
     def configure_optimizers(self):
-        optimizer = build_optimizer(self.current_model, self.config.optimizer)
+        if self.optimizer_mode == 'default':
+            print('build optimizer for incremental training')
+            optimizer_config = self.config.optimizer
+            lr_scheduler_config = self.config.lr_scheduler
+        elif self.optimizer_mode == 'cbf':
+            print('build optimizer for CBF training')
+            optimizer_config = self.config.cbf_optimizer
+            lr_scheduler_config = self.config.cbf_lr_scheduler
+
+        else:
+            raise ValueError
+
+        optimizer = build_optimizer(self.current_model, optimizer_config)
+        if lr_scheduler_config:
+            return {
+                    'optimizer': optimizer,
+                    'lr_scheduler': build_lr_scheduler(optimizer, lr_scheduler_config),
+                    }
         return optimizer
 
     @staticmethod
@@ -320,7 +354,6 @@ class BaseCIL(pl.LightningModule):
             losses = self.current_model(imgs, labels, mixed_bg=batch_data['blended'])
         else:
             losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
-
         if self.use_kd and self.current_task > 0:
             kd_loss = 0
             kd_criterion = nn.MSELoss()
@@ -337,13 +370,15 @@ class BaseCIL(pl.LightningModule):
             losses['kd_loss'] = 0.
 
         # loss = losses['loss_cls'] + losses['kd_loss']
-        loss = 0
+        # loss = 0
         batch_size = imgs.shape[0]
         for loss_name, loss_value in losses.items():
             self.log('train_' + loss_name, losses[loss_name], on_step=True, on_epoch=True, prog_bar=True, logger=True,
                  batch_size=batch_size)
 
-            loss = loss + losses[loss_name]
+        loss = losses['kd_loss'] + losses['loss_cls']
+        if 'loss_bg_mixed' in losses:
+            loss += losses['loss_bg_mixed']
         # self.log('train_loss_cls', losses['loss_cls'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
         #          batch_size=batch_size)
         # self.log('train_loss_kd', losses['kd_loss'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
@@ -369,6 +404,9 @@ class BaseCIL(pl.LightningModule):
         return {'cls_score': cls_score,
                 'label': batch_data['label']
                 }
+
+    # def on_epoch_start(self) -> None:
+    #     print(self.optimizers())
 
 
 class CILTrainer:
@@ -400,13 +438,30 @@ class CILTrainer:
         # resume training
         else:
             self.data_module.collect_ann_files_from_work_dir()
-            self.data_module.collect_exemplar_fron_work_dir()
+            try:
+                self.data_module.collect_exemplar_fron_work_dir()
+            except FileNotFoundError:
+                for i in range(len(self.data_module.exemplar_datasets), self.starting_task):
+                    self._current_task = i
+                    print('Create exemplar for task {}'.format(i))
+                    class_indices = [self.data_module.ori_idx_to_inc_idx[idx] for idx in
+                                     self.task_splits[self.current_task]]
+                    manager = Herding(budget_size=self.config.budget_size,
+                                      class_indices=class_indices,
+                                      cosine_distance=True,
+                                      storing_methods=self.config.storing_methods,
+                                      budget_type=self.config.budget_type)
+                    prediction_with_meta = self._extract_features_for_constructing_exemplar()
+                    exemplar_meta = manager.construct_exemplar(prediction_with_meta)
+                    self.data_module.build_exemplar_from_current_task(exemplar_meta)
+                self._current_task = self.starting_task
 
             # roll back to previous task_idx to load weights
             self._current_task -= 1
             self.cil_model.current_model.update_fc(self.num_classes)
             self.cil_model.current_model.load_state_dict(
                 torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)))
+            self.cil_model.prev_model.update_fc(self.num_classes)
             self.cil_model.prev_model.load_state_dict(self.cil_model.current_model.state_dict())
             self.cil_model.prev_model.eval()
 
@@ -438,11 +493,13 @@ class CILTrainer:
         return self.data_module.num_classes_per_task[self.current_task]
 
     def train_task(self):
+        # lr_monitor = LearningRateMonitor(logging_interval='step')
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.num_epochs_per_task,
                              # limit_train_batches=10,
-                             accumulate_grad_batches=self.config.accumulate_grad_batches
+                             accumulate_grad_batches=self.config.accumulate_grad_batches,
+                             # callbacks=[lr_monitor]
                              )
         trainer.fit(self.cil_model, self.data_module)
 
@@ -458,16 +515,17 @@ class CILTrainer:
 
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
-                             max_epochs=self.config.num_epochs_per_task,
+                             max_epochs=self.config.cbf_num_epochs_per_task,
                              accumulate_grad_batches=self.config.accumulate_grad_batches
                              )
-
+        self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
             trainer.fit(self.cil_model, loader)
         else:
             self.cil_model.current_model.freeze_backbone()
             trainer.fit(self.cil_model, loader)
             self.cil_model.current_model.unfreeze_backbone()
+        self.cil_model.optimizer_mode = 'default'
 
     def _resume(self):
         pass

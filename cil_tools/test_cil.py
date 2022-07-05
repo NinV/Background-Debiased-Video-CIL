@@ -11,6 +11,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train a recognizer')
     parser.add_argument('config', help='train config file path')
     parser.add_argument('--work_dir', help='the dir to save logs and models')
+    parser.add_argument('--gpu_ids', type=int, nargs='*', help='ids of gpus to use')
 
     # other configs
     parser.add_argument('--testing_videos_per_gpu', type=int)
@@ -31,6 +32,7 @@ def main():
     args, cfg_dict = parse_args()
     config = Config.fromfile(args.config)
     config.merge_from_dict(cfg_dict)
+    config.starting_task = 0
     trainer = CILTrainer(config, dump_config=False)
     trainer.cil_testing()
 
