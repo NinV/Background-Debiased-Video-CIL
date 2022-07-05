@@ -11,6 +11,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train a recognizer')
     parser.add_argument('config', help='train config file path')
     parser.add_argument('--work_dir', help='the dir to save logs and models')
+    parser.add_argument('--gpu_ids', type=int, nargs='*', help='ids of gpus to use')
 
     # other configs
     parser.add_argument('--testing_videos_per_gpu', type=int)
