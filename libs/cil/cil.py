@@ -57,6 +57,7 @@ class CILDataModule(pl.LightningDataModule):
         self.test_datasets = []
         self.features_extraction_dataset = None
         self.exemplar_datasets = []
+        self._all_bg_files = set()
 
     @property
     def current_task(self):
@@ -167,6 +168,10 @@ class CILDataModule(pl.LightningDataModule):
 
         elif exemplar is not None:
             self.train_dataset = self.merge_dataset(self.train_dataset, exemplar)
+
+        if isinstance(self.train_dataset, BackgroundMixDataset):
+            self._all_bg_files.update(self.train_dataset.bg_files)
+            self.train_dataset.bg_files = list(self._all_bg_files)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset,
