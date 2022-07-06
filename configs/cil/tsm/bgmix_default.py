@@ -208,3 +208,6 @@ data = dict(
         data_prefix=data_root,
         pipeline=train_pipeline),
 )
+
+keep_all_backgrounds = False
+cbf_full_bg = False

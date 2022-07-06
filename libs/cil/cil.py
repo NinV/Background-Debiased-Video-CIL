@@ -74,6 +74,10 @@ class CILDataModule(pl.LightningDataModule):
             size += len(ex)
         return size
 
+    @property
+    def all_bg_files(self):
+        return self._all_bg_files
+
     def generate_annotation_file(self) -> None:
         train_ann_file = pathlib.Path(self.config.train_ann_file)
         val_ann_file = pathlib.Path(self.config.val_ann_file)
@@ -136,18 +140,25 @@ class CILDataModule(pl.LightningDataModule):
     def build_cbf_dataset(self):
         dataset = build_dataset(self.config.data.train)  # TODO: create a exemplar data pipeline in config file
         dataset.video_infos = []
+
         if isinstance(dataset, BackgroundMixDataset):
             dataset.bg_files = []
+
+        if self.config.keep_all_backgrounds:
+            dataset = self.merge_dataset(dataset, self.exemplar_datasets)
+            dataset.bg_files = list(self._all_bg_files)
+
+        elif self.config.cbf_full_bg:
             dataset = self.merge_dataset(dataset, self.exemplar_datasets)
             all_bg_files_ = set(self.train_dataset.bg_files) | set(dataset.bg_files)
             dataset.bg_files = list(all_bg_files_)
-            print('CBF dataset built ({} videos, {} background)'.format(len(dataset), len(dataset.bg_files)))
 
         elif isinstance(dataset, RawframeDataset):
             dataset = self.merge_dataset(dataset, self.exemplar_datasets)
 
         else:
             raise NotImplementedError
+        print('CBF dataset built ({} videos, {} background)'.format(len(dataset), len(dataset.bg_files)))
         return dataset
 
     def reload_train_dataset(self,
@@ -169,9 +180,15 @@ class CILDataModule(pl.LightningDataModule):
         elif exemplar is not None:
             self.train_dataset = self.merge_dataset(self.train_dataset, exemplar)
 
-        if isinstance(self.train_dataset, BackgroundMixDataset):
+        if isinstance(self.train_dataset, BackgroundMixDataset) and self.config.keep_all_backgrounds:
             self._all_bg_files.update(self.train_dataset.bg_files)
             self.train_dataset.bg_files = list(self._all_bg_files)
+
+    def get_training_set_at_task_i(self, taskIdx):
+        self.config.data.train.ann_file = str(self.task_splits_ann_files['train'][taskIdx])
+        dataset = build_dataset(self.config.data.train)
+        self.config.data.train.ann_file = str(self.task_splits_ann_files['train'][self.current_task])
+        return dataset
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset,
@@ -263,6 +280,9 @@ class CILDataModule(pl.LightningDataModule):
         else:
             raise TypeError
         return source
+
+    def store_bg_files(self, bg_files):
+        self._all_bg_files.update(bg_files)
 
 
 class BaseCIL(pl.LightningModule):
@@ -474,6 +494,12 @@ class CILTrainer:
             self._current_task += 1
             self.cil_model.current_model.update_fc(self.num_classes)
             self.cil_model.prev_model.update_fc(self.num_classes)
+
+            if self.config.keep_all_backgrounds:
+                for i in range(self._current_task):
+                    dataset = self.data_module.get_training_set_at_task_i(i)
+                    self.data_module.store_bg_files(dataset.bg_files)
+                print('{} background stored'.format(len(self.data_module.all_bg_files)))
             self.data_module.reload_train_dataset(use_internal_exemplar=True)
 
         self.data_module.build_validation_datasets()
@@ -502,7 +528,7 @@ class CILTrainer:
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.num_epochs_per_task,
-                             # limit_train_batches=10,
+                             limit_train_batches=10,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # callbacks=[lr_monitor]
                              )
@@ -521,7 +547,8 @@ class CILTrainer:
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.cbf_num_epochs_per_task,
-                             accumulate_grad_batches=self.config.accumulate_grad_batches
+                             accumulate_grad_batches=self.config.accumulate_grad_batches,
+                             limit_train_batches=10,
                              )
         self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
@@ -590,6 +617,8 @@ class CILTrainer:
                                                                                   len(self.data_module.train_dataset),
                                                                                   self.data_module.exemplar_size,
                                                                                   ))
+        if isinstance(self.data_module.train_dataset, BackgroundMixDataset):
+            print('Number of backgrounds:', len(self.data_module.train_dataset.bg_files))
 
     def _extract_features_for_constructing_exemplar(self):
         """
