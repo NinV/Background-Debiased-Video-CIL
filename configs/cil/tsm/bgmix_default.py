@@ -84,7 +84,8 @@ optimizer = dict(
     momentum=0.9,
     weight_decay=0.0001)
 optimizer_config = dict(grad_clip=dict(max_norm=20, norm_type=2))
-lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0.1))
+lr_scheduler = dict()
+# lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0.1))
 # lr_config = dict(policy='step', step=[20, 30])
 
 # cbf optimizer and lr_scheduler
@@ -93,10 +94,10 @@ cbf_optimizer = dict(
     type='SGD',
     constructor='CILTSMOptimizerConstructor',
     paramwise_cfg=dict(fc_lr5=True),
-    lr=0.001,
+    lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)
-cbf_lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0.1))
+cbf_lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20], gamma=0.1))
 
 # dataset settings
 data_root = 'data/ucf101/rawframes/'
