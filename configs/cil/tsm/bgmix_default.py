@@ -126,12 +126,7 @@ train_pipeline = [
     dict(type='ToTensor', keys=['imgs', 'label'])
 ]
 val_pipeline = [
-    dict(
-        type='SampleFrames',
-        clip_len=1,
-        frame_interval=1,
-        num_clips=8,
-        test_mode=True),
+    dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8, test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
     dict(type='CenterCrop', crop_size=224),
@@ -163,16 +158,10 @@ test_pipeline = [
 # this pipeline should be similar to validation pipeline if only run one epoch
 # In case we ran multiple epochs, this pipeline should be similar to train pipeline
 features_extraction_pipeline = [
-    dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8),
+    dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8, test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    dict(
-        type='MultiScaleCrop',
-        input_size=224,
-        scales=(1, 0.875, 0.75, 0.66),
-        random_crop=False,
-        max_wh_scale_gap=1,
-        num_fixed_crops=13),
+    dict(type='CenterCrop', crop_size=224),
     dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
@@ -209,7 +198,7 @@ data = dict(
         bg_dir=background_dir,
         data_prefix=data_root,
         pipeline=features_extraction_pipeline),
-    features_extraction_epochs=2,      # this value should be set to 1 if there's no randomness in pipeline
+    features_extraction_epochs=1,      # this value should be set to 1 if there's no randomness in pipeline
 
     exemplar=dict(
         type=dataset_type,
