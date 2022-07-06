@@ -528,7 +528,7 @@ class CILTrainer:
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.num_epochs_per_task,
-                             limit_train_batches=10,
+                             # limit_train_batches=10,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # callbacks=[lr_monitor]
                              )
@@ -548,7 +548,7 @@ class CILTrainer:
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.cbf_num_epochs_per_task,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
-                             limit_train_batches=10,
+                             # limit_train_batches=10,
                              )
         self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
