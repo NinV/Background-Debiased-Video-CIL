@@ -691,7 +691,6 @@ class CILTrainer:
             else:
                 loader = self.data_module.get_test_dataloader(task_idx)
                 loader.dataset.test_mode = True
-
             pred_ = trainer.predict(model=self.cil_model,
                                     dataloaders=loader)
             # collate data
@@ -717,10 +716,12 @@ class CILTrainer:
                 batch_size, dims = repr.shape
                 num_classes = exemplar_class_means.size(0)
                 repr_broadcast = repr.unsqueeze(dim=1).expand(batch_size, num_classes, dims)
-
                 # dist.shape =  [batch_size, num_classes]
-                dist = torch.linalg.vector_norm(repr_broadcast - exemplar_class_means, ord=2, dim=2)
-                preds_nme = torch.argmin(dist, dim=1, keepdim=False)
+                # dist = torch.linalg.vector_norm(repr_broadcast - exemplar_class_means, ord=2, dim=2)
+                # preds_nme = torch.argmin(dist, dim=1, keepdim=False)
+
+                similarity = F.cosine_similarity(repr_broadcast, exemplar_class_means, dim=-1)
+                preds_nme = torch.argmax(similarity, dim=1, keepdim=False)
                 nme_acc = metric(preds_nme, labels)
                 nme_accuracies.append(nme_acc.item() * 100)
         print('Accuracy across task:', cnn_accuracies)
