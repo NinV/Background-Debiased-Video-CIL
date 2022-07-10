@@ -328,6 +328,8 @@ class BaseCIL(pl.LightningModule):
         # optimizers
         self.optimizer_mode = 'default'         # ['default', 'cbf']
 
+        self.extract_meta = False
+
     # initialization
     def configure_optimizers(self):
         if self.optimizer_mode == 'default':
@@ -413,25 +415,22 @@ class BaseCIL(pl.LightningModule):
     def predict_step(self, batch_data, batch_idx, dataloader_idx: Optional[int] = None):
         x = batch_data['imgs']
         cls_score = self.current_model(x, return_loss=False)
-        # cls_score = torch.rand(x.size(0), self.current_model.cls_head.num_classes)
+        result = {'cls_score': cls_score,
+                  'label': batch_data['label']
+                  }
         if self.extract_repr:
-            # metadata for constructing exemplar
-            return {'frame_dir': batch_data['frame_dir'],
-                    'total_frames': batch_data['total_frames'],
-                    'label': batch_data['label'],
-                    'clip_len': batch_data['clip_len'],
-                    'num_clips': batch_data['num_clips'],
-                    'frame_inds': batch_data['frame_inds'],
-                    'cls_score': cls_score,
-                    'repr': self._extract_repr()
-                    # 'repr': torch.rand(x.size(0), 512)
-                    }
-        return {'cls_score': cls_score,
-                'label': batch_data['label']
-                }
-
-    # def on_epoch_start(self) -> None:
-    #     print(self.optimizers())
+            repr = self._extract_repr()
+            batch_size = batch_data['imgs'].size(0)
+            embedding_size = repr.size(-1)
+            repr = repr.view(batch_size, -1, embedding_size)
+            repr = torch.mean(repr, dim=1, keepdim=False)
+            result['repr'] = repr
+            assert result['repr'].size(0) == result['cls_score'].size(0)
+        if self.extract_meta:
+            for k, v in batch_data:
+                if k not in ['label', 'imgs']:
+                    result[k] = v
+        return result
 
 
 class CILTrainer:
@@ -632,7 +631,8 @@ class CILTrainer:
                              )
 
         loader = self.data_module.features_extraction_dataloader()
-        self.cil_model.extract_repr = True  # to extract features and other meta data
+        self.cil_model.extract_repr = True  # to extract features
+        self.cil_model.extract_meta = True  # and other meta data
         prediction_with_meta = []
         for _ in range(self.config.data.features_extraction_epochs):
             pred_ = trainer.predict(model=self.cil_model,
@@ -640,6 +640,7 @@ class CILTrainer:
 
             prediction_with_meta.append(pred_)
         self.cil_model.extract_repr = False  # reset flag
+        self.cil_model.extract_meta = False
 
         # collate data
         frame_dir = [batch_data['frame_dir'] for batch_data in prediction_with_meta[0]]
@@ -670,17 +671,19 @@ class CILTrainer:
         }
         return collated_prediction_with_meta
 
-    def _testing(self, use_validation_set=True):
+    def _testing(self, use_validation_set=True, exemplar_class_means=None):
         print('Begin testing')
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.data.features_extraction_epochs,
                              logger=False
                              )
-        self.cil_model.extract_repr = False
+        if exemplar_class_means is not None:
+            self.cil_model.extract_repr = True
         metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes, multiclass=True)
 
-        accuracies = []
+        cnn_accuracies = []
+        nme_accuracies = []
         for task_idx in range(self.current_task + 1):
             if use_validation_set:
                 loader = self.data_module.get_val_dataloader(task_idx)
@@ -702,15 +705,38 @@ class CILTrainer:
 
             preds = torch.argmax(cls_score, dim=1, keepdim=False)
             acc = metric(preds, labels)
-            accuracies.append(acc.item() * 100)
-        print('Accuracy across task:', accuracies)
-        return accuracies
+            cnn_accuracies.append(acc.item() * 100)
 
-    def cil_testing(self):
+            if exemplar_class_means is not None:
+                repr = []
+                for batch_data in pred_:
+                    repr.append(batch_data['repr'])
+                repr = torch.cat(repr, dim=0)
+                repr = repr.reshape(-1, repr.size(1))
+
+                batch_size, dims = repr.shape
+                num_classes = exemplar_class_means.size(0)
+                repr_broadcast = repr.unsqueeze(dim=1).expand(batch_size, num_classes, dims)
+
+                # dist.shape =  [batch_size, num_classes]
+                dist = torch.linalg.vector_norm(repr_broadcast - exemplar_class_means, ord=2, dim=2)
+                preds_nme = torch.argmin(dist, dim=1, keepdim=False)
+                nme_acc = metric(preds_nme, labels)
+                nme_accuracies.append(nme_acc.item() * 100)
+        print('Accuracy across task:', cnn_accuracies)
+
+        if exemplar_class_means is not None:
+            print('Accuracy across task (nme):', nme_accuracies)
+            self.cil_model.extract_repr = False     # reset flag
+            return cnn_accuracies, nme_accuracies
+        return cnn_accuracies
+
+    def cil_testing(self, test_nme=False):
         tmp = self._current_task
-        all_task_accuracies = []
-        for taskIdx in range(self.num_tasks):
-            self._current_task = taskIdx
+        cnn_accuracies = []
+        nme_accuracies = []
+        for task_idx in range(self.num_tasks):
+            self._current_task = task_idx
             self.data_module.config.data.test.ann_file = str(
                 self.data_module.task_splits_ann_files['val'][self.current_task])
             self.data_module.test_datasets.append(build_dataset(self.config.data.test))
@@ -719,7 +745,84 @@ class CILTrainer:
             self.cil_model.current_model.load_state_dict(
                 torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task))
             )
-            task_i_accuracies = self._testing(use_validation_set=False)
-            all_task_accuracies.append(task_i_accuracies)
+            if test_nme:
+                exemplar_class_means = self._get_exemplar_class_means(task_idx)
+                cnn_task_i_accuracies, nme_task_i_accuracies = self._testing(use_validation_set=False,
+                                                                             exemplar_class_means=exemplar_class_means)
+                cnn_accuracies.append(cnn_task_i_accuracies)
+                nme_accuracies.append(nme_task_i_accuracies)
+            else:
+                cnn_task_i_accuracies = self._testing(use_validation_set=False)
+                cnn_accuracies.append(cnn_task_i_accuracies)
+
+        print('CNN accuracies')
+        print(print_mean_accuracy(cnn_accuracies, [len(class_indices) for class_indices in self.task_splits]))
+        if test_nme:
+            print('NME accuracies')
+            print(print_mean_accuracy(nme_accuracies, [len(class_indices) for class_indices in self.task_splits]))
+
         self._current_task = tmp  # reset state
-        print(print_mean_accuracy(all_task_accuracies, [len(class_indices) for class_indices in self.task_splits]))
+
+    def _get_exemplar_class_means(self, task_idx, pipeline=''):
+        # load class mean from file
+        exemplar_class_mean_file = self.ckpt_dir / 'exemplar_class_mean_task_{}.pt'.format(task_idx)
+        if exemplar_class_mean_file.exists():
+            class_means = torch.load(exemplar_class_mean_file)['class_means']
+
+        # or extract class mean from exemplar
+        else:
+            print('Begin extract class mean from exemplar')
+            if pipeline == 'valid':
+                cfg = copy.deepcopy(self.config.data.val)
+            elif pipeline == 'test':
+                cfg = copy.deepcopy(self.config.data.test)
+            else:
+                cfg = copy.deepcopy(self.config.data.features_extraction)
+                # raise ValueError
+
+            raw_str_list = []
+            for i in range(task_idx + 1):
+                with open(self.data_module.exemplar_dir / 'exemplar_task_{}.txt'.format(i), 'r') as f:
+                    raw_str_list.append(f.read().strip())
+
+            raw_str = '\n'.join(raw_str_list)
+            tmp_exemplars_file = self.data_module.exemplar_dir / 'tmp_exemplars.txt'
+            with open(tmp_exemplars_file, 'w') as f:
+                f.write(raw_str)
+
+            cfg.ann_file = str(tmp_exemplars_file)
+            dataset = build_dataset(cfg)
+            dataset.test_mode = True
+
+            loader = DataLoader(dataset,
+                                batch_size=self.config.testing_videos_per_gpu,
+                                num_workers=self.config.testing_workers_per_gpu,
+                                pin_memory=True,
+                                shuffle=False
+                                )
+
+            trainer = pl.Trainer(gpus=self.config.gpu_ids,
+                                 default_root_dir=self.config.work_dir,
+                                 max_epochs=1,
+                                 logger=False
+                                 )
+            self.cil_model.extract_repr = True
+            self.cil_model.current_model.update_fc(self.num_classes)
+
+            pred_ = trainer.predict(model=self.cil_model,
+                                    dataloaders=loader)
+            repr = []
+            for batch_data in pred_:
+                repr.append(batch_data['repr'])
+            repr = torch.cat(repr, dim=0)
+            repr = repr.reshape(-1, repr.size(1))
+
+            label = torch.cat([batch_data['label'] for batch_data in pred_], dim=0).squeeze(dim=1)
+            class_means = []
+            for class_idx in range(self.num_classes):
+                indices = (label == class_idx).nonzero().squeeze()
+                class_means.append(torch.mean(repr[indices], dim=0))
+
+            class_means = torch.stack(class_means, dim=0)
+            torch.save({'class_means': class_means}, exemplar_class_mean_file)
+        return class_means
