@@ -428,7 +428,7 @@ class BaseCIL(pl.LightningModule):
             result['repr'] = repr
             assert result['repr'].size(0) == result['cls_score'].size(0)
         if self.extract_meta:
-            for k, v in batch_data:
+            for k, v in batch_data.items():
                 if k not in ['label', 'imgs']:
                     result[k] = v
         return result
