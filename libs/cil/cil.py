@@ -423,6 +423,7 @@ class BaseCIL(pl.LightningModule):
             batch_size = batch_data['imgs'].size(0)
             embedding_size = repr.size(-1)
             repr = repr.view(batch_size, -1, embedding_size)
+            repr = F.normalize(repr, p=2, dim=-1)
             repr = torch.mean(repr, dim=1, keepdim=False)
             result['repr'] = repr
             assert result['repr'].size(0) == result['cls_score'].size(0)
