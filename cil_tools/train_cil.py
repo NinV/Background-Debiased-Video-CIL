@@ -30,6 +30,7 @@ def parse_args():
     # keep_all_backgrounds = False
     # cbf_full_bg = False
     parser.add_argument('--budget_size', type=int)
+    parser.add_argument('--alpha', default=0.5, type=float)
     parser.add_argument('--num_epochs_per_task', type=int)
     parser.add_argument('--cbf_num_epochs_per_task', type=int)
     args = parser.parse_args()
@@ -49,6 +50,9 @@ def main():
     args, cfg_dict = parse_args()
     config = Config.fromfile(args.config)
     config.merge_from_dict(cfg_dict)
+    if hasattr(config.data.train, 'alpha'):
+        config.data.train.alpha = config.alpha
+
     trainer = CILTrainer(config)
     trainer.train()
 
