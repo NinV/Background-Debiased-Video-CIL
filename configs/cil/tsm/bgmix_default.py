@@ -172,14 +172,15 @@ features_extraction_pipeline = [
 
 dataset_type = 'BackgroundMixDataset'
 background_dir = 'bg_extract'
-alpha = 0.5
 data = dict(
     train=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
         bg_dir=background_dir,
         data_prefix=data_root,
-        pipeline=train_pipeline),
+        pipeline=train_pipeline,
+        alpha=0.5
+    ),
     val=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
