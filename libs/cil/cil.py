@@ -362,6 +362,9 @@ class BaseCIL(pl.LightningModule):
     def current_task(self):
         return self.controller.current_task
 
+    def num_classes(self, task_idx=-1):
+        return self.controller.num_classes(task_idx)
+
     # others
     def _extract_repr(self):
         # https://mmaction2.readthedocs.io/en/latest/_modules/mmaction/models/heads/tsm_head.html#TSMHead
@@ -375,6 +378,7 @@ class BaseCIL(pl.LightningModule):
         return self.current_model(x)
 
     def training_step(self, batch_data, batch_idx):
+        previous_task_num_classes = self.num_classes(self.current_task - 1)
         # x.shape = (batch_size, channels, T, H, W)
         imgs, labels = batch_data['imgs'], batch_data['label']
         if 'blended' in batch_data:
@@ -391,7 +395,13 @@ class BaseCIL(pl.LightningModule):
             for m_name in self.kd_modules_names:
                 current_model_features = self.current_model_kd_hooks.get_layer_output(m_name)
                 prev_model_features = self.prev_model_kd_hooks.get_layer_output(m_name).detach()
-                kd_loss += kd_criterion(current_model_features, prev_model_features)
+
+                if self.config.kd_exemplar_only:
+                    indices = (batch_data['label'].view(-1) < previous_task_num_classes).nonzero().squeeze()
+                    if indices.nelement():
+                        kd_loss += kd_criterion(current_model_features[indices], prev_model_features[indices])
+                else:
+                    kd_loss += kd_criterion(current_model_features, prev_model_features)
             losses['kd_loss'] = kd_loss
         else:
             losses['kd_loss'] = 0.
@@ -483,17 +493,17 @@ class CILTrainer:
 
             # roll back to previous task_idx to load weights
             self._current_task -= 1
-            self.cil_model.current_model.update_fc(self.num_classes)
+            self.cil_model.current_model.update_fc(self.num_classes())
             self.cil_model.current_model.load_state_dict(
                 torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)))
-            self.cil_model.prev_model.update_fc(self.num_classes)
+            self.cil_model.prev_model.update_fc(self.num_classes())
             self.cil_model.prev_model.load_state_dict(self.cil_model.current_model.state_dict())
             self.cil_model.prev_model.eval()
 
             # back to starting task update the classifier
             self._current_task += 1
-            self.cil_model.current_model.update_fc(self.num_classes)
-            self.cil_model.prev_model.update_fc(self.num_classes)
+            self.cil_model.current_model.update_fc(self.num_classes())
+            self.cil_model.prev_model.update_fc(self.num_classes())
 
             if self.config.keep_all_backgrounds:
                 for i in range(self._current_task):
@@ -519,9 +529,11 @@ class CILTrainer:
     def val_dataset(self):
         return self.data_module.val_datasets[self._current_task]
 
-    @property
-    def num_classes(self):
-        return self.data_module.num_classes_per_task[self.current_task]
+    def num_classes(self, task_idx=-1):
+        if task_idx == -1:
+            return self.data_module.num_classes_per_task[self.current_task]
+        else:
+            return self.data_module.num_classes_per_task[task_idx]
 
     def train_task(self):
         # lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -598,13 +610,13 @@ class CILTrainer:
             if self._current_task < self.num_tasks:  # sanity check
                 self.cil_model.prev_model.load_state_dict(self.cil_model.current_model.state_dict())
                 self.cil_model.prev_model.eval()
-                self.cil_model.current_model.update_fc(self.num_classes)
+                self.cil_model.current_model.update_fc(self.num_classes())
 
                 # update the fc layer of prev model here will simplify the training loops (load state dict)
                 # In theory, prev model does not need a classifier, but the mmaction2 required a Classifier
                 # for Recognizer2D class
                 # this does not affect KD loss because the classifier does not contribute to KD loss
-                self.cil_model.prev_model.update_fc(self.num_classes)
+                self.cil_model.prev_model.update_fc(self.num_classes())
 
                 # 3. prepare data for next task and update model
                 self.data_module.reload_train_dataset(use_internal_exemplar=True)
@@ -613,7 +625,7 @@ class CILTrainer:
     def print_task_info(self):
         print('Task {}, current heads: {}\n'
               'Training set size: {} (including {} samples from exemplar)'.format(self._current_task,
-                                                                                  self.num_classes,
+                                                                                  self.num_classes(),
                                                                                   len(self.data_module.train_dataset),
                                                                                   self.data_module.exemplar_size,
                                                                                   ))
@@ -681,7 +693,7 @@ class CILTrainer:
                              )
         if exemplar_class_means is not None:
             self.cil_model.extract_repr = True
-        metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes, multiclass=True)
+        metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes(), multiclass=True)
 
         cnn_accuracies = []
         nme_accuracies = []
@@ -743,7 +755,7 @@ class CILTrainer:
                 self.data_module.task_splits_ann_files['val'][self.current_task])
             self.data_module.test_datasets.append(build_dataset(self.config.data.test))
 
-            self.cil_model.current_model.update_fc(self.num_classes)
+            self.cil_model.current_model.update_fc(self.num_classes())
             self.cil_model.current_model.load_state_dict(
                 torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task))
             )
@@ -809,7 +821,7 @@ class CILTrainer:
                                  logger=False
                                  )
             self.cil_model.extract_repr = True
-            self.cil_model.current_model.update_fc(self.num_classes)
+            self.cil_model.current_model.update_fc(self.num_classes())
 
             pred_ = trainer.predict(model=self.cil_model,
                                     dataloaders=loader)
@@ -821,7 +833,7 @@ class CILTrainer:
 
             label = torch.cat([batch_data['label'] for batch_data in pred_], dim=0).squeeze(dim=1)
             class_means = []
-            for class_idx in range(self.num_classes):
+            for class_idx in range(self.num_classes()):
                 indices = (label == class_idx).nonzero().squeeze()
                 class_means.append(torch.mean(repr[indices], dim=0))
 

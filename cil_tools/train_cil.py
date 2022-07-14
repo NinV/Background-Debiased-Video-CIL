@@ -33,6 +33,7 @@ def parse_args():
     parser.add_argument('--alpha', default=0.5, type=float)
     parser.add_argument('--num_epochs_per_task', type=int)
     parser.add_argument('--cbf_num_epochs_per_task', type=int)
+    parser.add_argument('--kd_exemplar_only', action='store_true', help='Only Apply KD on exemplar')
     args = parser.parse_args()
 
     # cfg_dict are used for updating the configurations from config file

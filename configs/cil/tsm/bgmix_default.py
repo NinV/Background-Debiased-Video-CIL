@@ -74,7 +74,7 @@ model = dict(
 
 kd_modules_names = ['backbone.layer1', 'backbone.layer2', 'backbone.layer3', 'backbone.layer4', 'cls_head.avg_pool']
 repr_hook = 'cls_head.avg_pool'     # extract representation
-
+kd_exemplar_only = False
 # cil optimizer and lr_scheduler
 optimizer = dict(
     type='SGD',
