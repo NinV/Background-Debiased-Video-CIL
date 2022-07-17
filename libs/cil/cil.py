@@ -57,6 +57,7 @@ class CILDataModule(pl.LightningDataModule):
         self.test_datasets = []
         self.features_extraction_dataset = None
         self.exemplar_datasets = []
+        self._all_bg_files = set()
 
     @property
     def current_task(self):
@@ -72,6 +73,10 @@ class CILDataModule(pl.LightningDataModule):
         for ex in self.exemplar_datasets:
             size += len(ex)
         return size
+
+    @property
+    def all_bg_files(self):
+        return self._all_bg_files
 
     def generate_annotation_file(self) -> None:
         train_ann_file = pathlib.Path(self.config.train_ann_file)
@@ -135,18 +140,25 @@ class CILDataModule(pl.LightningDataModule):
     def build_cbf_dataset(self):
         dataset = build_dataset(self.config.data.train)  # TODO: create a exemplar data pipeline in config file
         dataset.video_infos = []
+
         if isinstance(dataset, BackgroundMixDataset):
             dataset.bg_files = []
+
+        if self.config.keep_all_backgrounds:
+            dataset = self.merge_dataset(dataset, self.exemplar_datasets)
+            dataset.bg_files = list(self._all_bg_files)
+
+        elif self.config.cbf_full_bg:
             dataset = self.merge_dataset(dataset, self.exemplar_datasets)
             all_bg_files_ = set(self.train_dataset.bg_files) | set(dataset.bg_files)
             dataset.bg_files = list(all_bg_files_)
-            print('CBF dataset built ({} videos, {} background)'.format(len(dataset), len(dataset.bg_files)))
 
         elif isinstance(dataset, RawframeDataset):
             dataset = self.merge_dataset(dataset, self.exemplar_datasets)
 
         else:
             raise NotImplementedError
+        print('CBF dataset built ({} videos, {} background)'.format(len(dataset), len(dataset.bg_files)))
         return dataset
 
     def reload_train_dataset(self,
@@ -167,6 +179,16 @@ class CILDataModule(pl.LightningDataModule):
 
         elif exemplar is not None:
             self.train_dataset = self.merge_dataset(self.train_dataset, exemplar)
+
+        if isinstance(self.train_dataset, BackgroundMixDataset) and self.config.keep_all_backgrounds:
+            self._all_bg_files.update(self.train_dataset.bg_files)
+            self.train_dataset.bg_files = list(self._all_bg_files)
+
+    def get_training_set_at_task_i(self, taskIdx):
+        self.config.data.train.ann_file = str(self.task_splits_ann_files['train'][taskIdx])
+        dataset = build_dataset(self.config.data.train)
+        self.config.data.train.ann_file = str(self.task_splits_ann_files['train'][self.current_task])
+        return dataset
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset,
@@ -259,6 +281,9 @@ class CILDataModule(pl.LightningDataModule):
             raise TypeError
         return source
 
+    def store_bg_files(self, bg_files):
+        self._all_bg_files.update(bg_files)
+
 
 class BaseCIL(pl.LightningModule):
     def __init__(self,
@@ -303,6 +328,8 @@ class BaseCIL(pl.LightningModule):
         # optimizers
         self.optimizer_mode = 'default'         # ['default', 'cbf']
 
+        self.extract_meta = False
+
     # initialization
     def configure_optimizers(self):
         if self.optimizer_mode == 'default':
@@ -335,6 +362,9 @@ class BaseCIL(pl.LightningModule):
     def current_task(self):
         return self.controller.current_task
 
+    def num_classes(self, task_idx=-1):
+        return self.controller.num_classes(task_idx)
+
     # others
     def _extract_repr(self):
         # https://mmaction2.readthedocs.io/en/latest/_modules/mmaction/models/heads/tsm_head.html#TSMHead
@@ -348,6 +378,7 @@ class BaseCIL(pl.LightningModule):
         return self.current_model(x)
 
     def training_step(self, batch_data, batch_idx):
+        previous_task_num_classes = self.num_classes(self.current_task - 1)
         # x.shape = (batch_size, channels, T, H, W)
         imgs, labels = batch_data['imgs'], batch_data['label']
         if 'blended' in batch_data:
@@ -364,7 +395,13 @@ class BaseCIL(pl.LightningModule):
             for m_name in self.kd_modules_names:
                 current_model_features = self.current_model_kd_hooks.get_layer_output(m_name)
                 prev_model_features = self.prev_model_kd_hooks.get_layer_output(m_name).detach()
-                kd_loss += kd_criterion(current_model_features, prev_model_features)
+
+                if self.config.kd_exemplar_only:
+                    indices = (batch_data['label'].view(-1) < previous_task_num_classes).nonzero().squeeze()
+                    if indices.nelement():
+                        kd_loss += kd_criterion(current_model_features[indices], prev_model_features[indices])
+                else:
+                    kd_loss += kd_criterion(current_model_features, prev_model_features)
             losses['kd_loss'] = kd_loss
         else:
             losses['kd_loss'] = 0.
@@ -388,25 +425,23 @@ class BaseCIL(pl.LightningModule):
     def predict_step(self, batch_data, batch_idx, dataloader_idx: Optional[int] = None):
         x = batch_data['imgs']
         cls_score = self.current_model(x, return_loss=False)
-        # cls_score = torch.rand(x.size(0), self.current_model.cls_head.num_classes)
+        result = {'cls_score': cls_score,
+                  'label': batch_data['label']
+                  }
         if self.extract_repr:
-            # metadata for constructing exemplar
-            return {'frame_dir': batch_data['frame_dir'],
-                    'total_frames': batch_data['total_frames'],
-                    'label': batch_data['label'],
-                    'clip_len': batch_data['clip_len'],
-                    'num_clips': batch_data['num_clips'],
-                    'frame_inds': batch_data['frame_inds'],
-                    'cls_score': cls_score,
-                    'repr': self._extract_repr()
-                    # 'repr': torch.rand(x.size(0), 512)
-                    }
-        return {'cls_score': cls_score,
-                'label': batch_data['label']
-                }
-
-    # def on_epoch_start(self) -> None:
-    #     print(self.optimizers())
+            repr = self._extract_repr()
+            batch_size = batch_data['imgs'].size(0)
+            embedding_size = repr.size(-1)
+            repr = repr.view(batch_size, -1, embedding_size)
+            repr = F.normalize(repr, p=2, dim=-1)
+            repr = torch.mean(repr, dim=1, keepdim=False)
+            result['repr'] = repr
+            assert result['repr'].size(0) == result['cls_score'].size(0)
+        if self.extract_meta:
+            for k, v in batch_data.items():
+                if k not in ['label', 'imgs']:
+                    result[k] = v
+        return result
 
 
 class CILTrainer:
@@ -458,17 +493,23 @@ class CILTrainer:
 
             # roll back to previous task_idx to load weights
             self._current_task -= 1
-            self.cil_model.current_model.update_fc(self.num_classes)
+            self.cil_model.current_model.update_fc(self.num_classes())
             self.cil_model.current_model.load_state_dict(
                 torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)))
-            self.cil_model.prev_model.update_fc(self.num_classes)
+            self.cil_model.prev_model.update_fc(self.num_classes())
             self.cil_model.prev_model.load_state_dict(self.cil_model.current_model.state_dict())
             self.cil_model.prev_model.eval()
 
             # back to starting task update the classifier
             self._current_task += 1
-            self.cil_model.current_model.update_fc(self.num_classes)
-            self.cil_model.prev_model.update_fc(self.num_classes)
+            self.cil_model.current_model.update_fc(self.num_classes())
+            self.cil_model.prev_model.update_fc(self.num_classes())
+
+            if self.config.keep_all_backgrounds:
+                for i in range(self._current_task):
+                    dataset = self.data_module.get_training_set_at_task_i(i)
+                    self.data_module.store_bg_files(dataset.bg_files)
+                print('{} background stored'.format(len(self.data_module.all_bg_files)))
             self.data_module.reload_train_dataset(use_internal_exemplar=True)
 
         self.data_module.build_validation_datasets()
@@ -488,9 +529,11 @@ class CILTrainer:
     def val_dataset(self):
         return self.data_module.val_datasets[self._current_task]
 
-    @property
-    def num_classes(self):
-        return self.data_module.num_classes_per_task[self.current_task]
+    def num_classes(self, task_idx=-1):
+        if task_idx == -1:
+            return self.data_module.num_classes_per_task[self.current_task]
+        else:
+            return self.data_module.num_classes_per_task[task_idx]
 
     def train_task(self):
         # lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -516,7 +559,8 @@ class CILTrainer:
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.cbf_num_epochs_per_task,
-                             accumulate_grad_batches=self.config.accumulate_grad_batches
+                             accumulate_grad_batches=self.config.accumulate_grad_batches,
+                             # limit_train_batches=10,
                              )
         self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
@@ -566,13 +610,13 @@ class CILTrainer:
             if self._current_task < self.num_tasks:  # sanity check
                 self.cil_model.prev_model.load_state_dict(self.cil_model.current_model.state_dict())
                 self.cil_model.prev_model.eval()
-                self.cil_model.current_model.update_fc(self.num_classes)
+                self.cil_model.current_model.update_fc(self.num_classes())
 
                 # update the fc layer of prev model here will simplify the training loops (load state dict)
                 # In theory, prev model does not need a classifier, but the mmaction2 required a Classifier
                 # for Recognizer2D class
                 # this does not affect KD loss because the classifier does not contribute to KD loss
-                self.cil_model.prev_model.update_fc(self.num_classes)
+                self.cil_model.prev_model.update_fc(self.num_classes())
 
                 # 3. prepare data for next task and update model
                 self.data_module.reload_train_dataset(use_internal_exemplar=True)
@@ -581,10 +625,12 @@ class CILTrainer:
     def print_task_info(self):
         print('Task {}, current heads: {}\n'
               'Training set size: {} (including {} samples from exemplar)'.format(self._current_task,
-                                                                                  self.num_classes,
+                                                                                  self.num_classes(),
                                                                                   len(self.data_module.train_dataset),
                                                                                   self.data_module.exemplar_size,
                                                                                   ))
+        if isinstance(self.data_module.train_dataset, BackgroundMixDataset):
+            print('Number of backgrounds:', len(self.data_module.train_dataset.bg_files))
 
     def _extract_features_for_constructing_exemplar(self):
         """
@@ -598,7 +644,8 @@ class CILTrainer:
                              )
 
         loader = self.data_module.features_extraction_dataloader()
-        self.cil_model.extract_repr = True  # to extract features and other meta data
+        self.cil_model.extract_repr = True  # to extract features
+        self.cil_model.extract_meta = True  # and other meta data
         prediction_with_meta = []
         for _ in range(self.config.data.features_extraction_epochs):
             pred_ = trainer.predict(model=self.cil_model,
@@ -606,6 +653,7 @@ class CILTrainer:
 
             prediction_with_meta.append(pred_)
         self.cil_model.extract_repr = False  # reset flag
+        self.cil_model.extract_meta = False
 
         # collate data
         frame_dir = [batch_data['frame_dir'] for batch_data in prediction_with_meta[0]]
@@ -636,17 +684,19 @@ class CILTrainer:
         }
         return collated_prediction_with_meta
 
-    def _testing(self, use_validation_set=True):
+    def _testing(self, use_validation_set=True, exemplar_class_means=None):
         print('Begin testing')
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.data.features_extraction_epochs,
                              logger=False
                              )
-        self.cil_model.extract_repr = False
-        metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes, multiclass=True)
+        if exemplar_class_means is not None:
+            self.cil_model.extract_repr = True
+        metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes(), multiclass=True)
 
-        accuracies = []
+        cnn_accuracies = []
+        nme_accuracies = []
         for task_idx in range(self.current_task + 1):
             if use_validation_set:
                 loader = self.data_module.get_val_dataloader(task_idx)
@@ -654,7 +704,6 @@ class CILTrainer:
             else:
                 loader = self.data_module.get_test_dataloader(task_idx)
                 loader.dataset.test_mode = True
-
             pred_ = trainer.predict(model=self.cil_model,
                                     dataloaders=loader)
             # collate data
@@ -668,24 +717,126 @@ class CILTrainer:
 
             preds = torch.argmax(cls_score, dim=1, keepdim=False)
             acc = metric(preds, labels)
-            accuracies.append(acc.item() * 100)
-        print('Accuracy across task:', accuracies)
-        return accuracies
+            cnn_accuracies.append(acc.item() * 100)
 
-    def cil_testing(self):
+            if exemplar_class_means is not None:
+                repr = []
+                for batch_data in pred_:
+                    repr.append(batch_data['repr'])
+                repr = torch.cat(repr, dim=0)
+                repr = repr.reshape(-1, repr.size(1))
+
+                batch_size, dims = repr.shape
+                num_classes = exemplar_class_means.size(0)
+                repr_broadcast = repr.unsqueeze(dim=1).expand(batch_size, num_classes, dims)
+                # dist.shape =  [batch_size, num_classes]
+                # dist = torch.linalg.vector_norm(repr_broadcast - exemplar_class_means, ord=2, dim=2)
+                # preds_nme = torch.argmin(dist, dim=1, keepdim=False)
+
+                similarity = F.cosine_similarity(repr_broadcast, exemplar_class_means, dim=-1)
+                preds_nme = torch.argmax(similarity, dim=1, keepdim=False)
+                nme_acc = metric(preds_nme, labels)
+                nme_accuracies.append(nme_acc.item() * 100)
+        print('Accuracy across task:', cnn_accuracies)
+
+        if exemplar_class_means is not None:
+            print('Accuracy across task (nme):', nme_accuracies)
+            self.cil_model.extract_repr = False     # reset flag
+            return cnn_accuracies, nme_accuracies
+        return cnn_accuracies
+
+    def cil_testing(self, test_nme=False):
         tmp = self._current_task
-        all_task_accuracies = []
-        for taskIdx in range(self.num_tasks):
-            self._current_task = taskIdx
+        cnn_accuracies = []
+        nme_accuracies = []
+        for task_idx in range(self.num_tasks):
+            self._current_task = task_idx
             self.data_module.config.data.test.ann_file = str(
                 self.data_module.task_splits_ann_files['val'][self.current_task])
             self.data_module.test_datasets.append(build_dataset(self.config.data.test))
 
-            self.cil_model.current_model.update_fc(self.num_classes)
+            self.cil_model.current_model.update_fc(self.num_classes())
             self.cil_model.current_model.load_state_dict(
                 torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task))
             )
-            task_i_accuracies = self._testing(use_validation_set=False)
-            all_task_accuracies.append(task_i_accuracies)
+            if test_nme:
+                exemplar_class_means = self._get_exemplar_class_means(task_idx)
+                cnn_task_i_accuracies, nme_task_i_accuracies = self._testing(use_validation_set=False,
+                                                                             exemplar_class_means=exemplar_class_means)
+                cnn_accuracies.append(cnn_task_i_accuracies)
+                nme_accuracies.append(nme_task_i_accuracies)
+            else:
+                cnn_task_i_accuracies = self._testing(use_validation_set=False)
+                cnn_accuracies.append(cnn_task_i_accuracies)
+
+        print('CNN accuracies')
+        print(print_mean_accuracy(cnn_accuracies, [len(class_indices) for class_indices in self.task_splits]))
+        if test_nme:
+            print('NME accuracies')
+            print(print_mean_accuracy(nme_accuracies, [len(class_indices) for class_indices in self.task_splits]))
+
         self._current_task = tmp  # reset state
-        print(print_mean_accuracy(all_task_accuracies, [len(class_indices) for class_indices in self.task_splits]))
+
+    def _get_exemplar_class_means(self, task_idx, pipeline=''):
+        # load class mean from file
+        exemplar_class_mean_file = self.ckpt_dir / 'exemplar_class_mean_task_{}.pt'.format(task_idx)
+        if exemplar_class_mean_file.exists():
+            class_means = torch.load(exemplar_class_mean_file)['class_means']
+
+        # or extract class mean from exemplar
+        else:
+            print('Begin extract class mean from exemplar')
+            if pipeline == 'valid':
+                cfg = copy.deepcopy(self.config.data.val)
+            elif pipeline == 'test':
+                cfg = copy.deepcopy(self.config.data.test)
+            else:
+                cfg = copy.deepcopy(self.config.data.features_extraction)
+                # raise ValueError
+
+            raw_str_list = []
+            for i in range(task_idx + 1):
+                with open(self.data_module.exemplar_dir / 'exemplar_task_{}.txt'.format(i), 'r') as f:
+                    raw_str_list.append(f.read().strip())
+
+            raw_str = '\n'.join(raw_str_list)
+            tmp_exemplars_file = self.data_module.exemplar_dir / 'tmp_exemplars.txt'
+            with open(tmp_exemplars_file, 'w') as f:
+                f.write(raw_str)
+
+            cfg.ann_file = str(tmp_exemplars_file)
+            dataset = build_dataset(cfg)
+            dataset.test_mode = True
+
+            loader = DataLoader(dataset,
+                                batch_size=self.config.testing_videos_per_gpu,
+                                num_workers=self.config.testing_workers_per_gpu,
+                                pin_memory=True,
+                                shuffle=False
+                                )
+
+            trainer = pl.Trainer(gpus=self.config.gpu_ids,
+                                 default_root_dir=self.config.work_dir,
+                                 max_epochs=1,
+                                 logger=False
+                                 )
+            self.cil_model.extract_repr = True
+            self.cil_model.current_model.update_fc(self.num_classes())
+
+            pred_ = trainer.predict(model=self.cil_model,
+                                    dataloaders=loader)
+            repr = []
+            for batch_data in pred_:
+                repr.append(batch_data['repr'])
+            repr = torch.cat(repr, dim=0)
+            repr = repr.reshape(-1, repr.size(1))
+
+            label = torch.cat([batch_data['label'] for batch_data in pred_], dim=0).squeeze(dim=1)
+            class_means = []
+            for class_idx in range(self.num_classes()):
+                indices = (label == class_idx).nonzero().squeeze()
+                class_means.append(torch.mean(repr[indices], dim=0))
+
+            class_means = torch.stack(class_means, dim=0)
+            torch.save({'class_means': class_means}, exemplar_class_mean_file)
+        return class_means

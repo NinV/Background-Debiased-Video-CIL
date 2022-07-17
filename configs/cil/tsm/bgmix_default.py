@@ -74,7 +74,7 @@ model = dict(
 
 kd_modules_names = ['backbone.layer1', 'backbone.layer2', 'backbone.layer3', 'backbone.layer4', 'cls_head.avg_pool']
 repr_hook = 'cls_head.avg_pool'     # extract representation
-
+kd_exemplar_only = False
 # cil optimizer and lr_scheduler
 optimizer = dict(
     type='SGD',
@@ -84,7 +84,8 @@ optimizer = dict(
     momentum=0.9,
     weight_decay=0.0001)
 optimizer_config = dict(grad_clip=dict(max_norm=20, norm_type=2))
-lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0.1))
+lr_scheduler = dict()
+# lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0.1))
 # lr_config = dict(policy='step', step=[20, 30])
 
 # cbf optimizer and lr_scheduler
@@ -93,10 +94,10 @@ cbf_optimizer = dict(
     type='SGD',
     constructor='CILTSMOptimizerConstructor',
     paramwise_cfg=dict(fc_lr5=True),
-    lr=0.001,
+    lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)
-cbf_lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0.1))
+cbf_lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20], gamma=0.1))
 
 # dataset settings
 data_root = 'data/ucf101/rawframes/'
@@ -126,12 +127,7 @@ train_pipeline = [
     dict(type='ToTensor', keys=['imgs', 'label'])
 ]
 val_pipeline = [
-    dict(
-        type='SampleFrames',
-        clip_len=1,
-        frame_interval=1,
-        num_clips=8,
-        test_mode=True),
+    dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8, test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
     dict(type='CenterCrop', crop_size=224),
@@ -163,16 +159,10 @@ test_pipeline = [
 # this pipeline should be similar to validation pipeline if only run one epoch
 # In case we ran multiple epochs, this pipeline should be similar to train pipeline
 features_extraction_pipeline = [
-    dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8),
+    dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8, test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    dict(
-        type='MultiScaleCrop',
-        input_size=224,
-        scales=(1, 0.875, 0.75, 0.66),
-        random_crop=False,
-        max_wh_scale_gap=1,
-        num_fixed_crops=13),
+    dict(type='CenterCrop', crop_size=224),
     dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
@@ -182,14 +172,15 @@ features_extraction_pipeline = [
 
 dataset_type = 'BackgroundMixDataset'
 background_dir = 'bg_extract'
-alpha = 0.5
 data = dict(
     train=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
         bg_dir=background_dir,
         data_prefix=data_root,
-        pipeline=train_pipeline),
+        pipeline=train_pipeline,
+        alpha=0.5
+    ),
     val=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
@@ -209,7 +200,7 @@ data = dict(
         bg_dir=background_dir,
         data_prefix=data_root,
         pipeline=features_extraction_pipeline),
-    features_extraction_epochs=2,      # this value should be set to 1 if there's no randomness in pipeline
+    features_extraction_epochs=1,      # this value should be set to 1 if there's no randomness in pipeline
 
     exemplar=dict(
         type=dataset_type,
@@ -218,3 +209,6 @@ data = dict(
         data_prefix=data_root,
         pipeline=train_pipeline),
 )
+
+keep_all_backgrounds = False
+cbf_full_bg = False
