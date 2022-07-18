@@ -59,6 +59,10 @@ class CILDataModule(pl.LightningDataModule):
         self.exemplar_datasets = []
         self._all_bg_files = set()
 
+        # flag to control predict_dataloader
+        self.predict_dataloader_mode = 'val'  # ['val', 'test']
+        self.predict_dataset_task_idx = 0
+
     @property
     def current_task(self):
         return self.controller.current_task
@@ -213,6 +217,21 @@ class CILDataModule(pl.LightningDataModule):
                           pin_memory=True,
                           shuffle=False
                           )
+
+    def predict_dataloader(self):
+        if self.predict_dataloader_mode == 'val':
+            print('[predict_dataloader] mode:', self.predict_dataloader_mode)
+            return self.get_val_dataloader(self.predict_dataset_task_idx)
+
+        if self.predict_dataloader_mode == 'test':
+            print('[predict_dataloader] mode:', self.predict_dataloader_mode)
+            return self.get_val_dataloader(self.predict_dataset_task_idx)
+
+        if self.predict_dataloader_mode == 'feature_extraction':
+            print('[predict_dataloader] mode:', self.predict_dataloader_mode)
+            return self.features_extraction_dataloader()
+        else:
+            raise ValueError
 
     def features_extraction_dataloader(self):
         """
@@ -643,13 +662,13 @@ class CILTrainer:
                              logger=False
                              )
 
-        loader = self.data_module.features_extraction_dataloader()
+        # loader = self.data_module.features_extraction_dataloader()
         self.cil_model.extract_repr = True  # to extract features
         self.cil_model.extract_meta = True  # and other meta data
         prediction_with_meta = []
         for _ in range(self.config.data.features_extraction_epochs):
-            pred_ = trainer.predict(model=self.cil_model,
-                                    dataloaders=loader)
+            self.data_module.predict_dataloader_mode = 'feature_extraction'
+            pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
 
             prediction_with_meta.append(pred_)
         self.cil_model.extract_repr = False  # reset flag
@@ -659,14 +678,14 @@ class CILTrainer:
         frame_dir = [batch_data['frame_dir'] for batch_data in prediction_with_meta[0]]
         frame_dir = [dir_name for batch_data in frame_dir for dir_name in batch_data]  # flatten list
 
-        repr = []
+        repr_ = []
         cls_score = []
         for i in range(self.config.data.features_extraction_epochs):
             for batch_data in prediction_with_meta[i]:
-                repr.append(batch_data['repr'])
+                repr_.append(batch_data['repr_'])
                 cls_score.append(batch_data['cls_score'])
-        repr = torch.cat(repr, dim=0)
-        repr = repr.reshape(-1, self.config.data.features_extraction_epochs, repr.size(1))
+        repr_ = torch.cat(repr_, dim=0)
+        repr_ = repr_.reshape(-1, self.config.data.features_extraction_epochs, repr_.size(1))
 
         cls_score = torch.cat(cls_score, dim=0)
         cls_score = cls_score.reshape(-1, self.config.data.features_extraction_epochs, cls_score.size(1))
@@ -679,7 +698,7 @@ class CILTrainer:
             'clip_len': torch.cat([batch_data['clip_len'] for batch_data in prediction_with_meta[0]], dim=0),
             'num_clips': torch.cat([batch_data['num_clips'] for batch_data in prediction_with_meta[0]], dim=0),
             'frame_inds': torch.cat([batch_data['frame_inds'] for batch_data in prediction_with_meta[0]], dim=0),
-            'repr': repr,
+            'repr_': repr_,
             'cls_score': cls_score
         }
         return collated_prediction_with_meta
@@ -699,13 +718,17 @@ class CILTrainer:
         nme_accuracies = []
         for task_idx in range(self.current_task + 1):
             if use_validation_set:
-                loader = self.data_module.get_val_dataloader(task_idx)
-                loader.dataset.test_mode = True
+                # loader = self.data_module.get_val_dataloader(task_idx)
+                # loader.dataset.test_mode = True
+                self.data_module.predict_dataloader_mode = 'val'
+                self.data_module.predict_dataset_task_idx = task_idx
             else:
-                loader = self.data_module.get_test_dataloader(task_idx)
-                loader.dataset.test_mode = True
-            pred_ = trainer.predict(model=self.cil_model,
-                                    dataloaders=loader)
+                # loader = self.data_module.get_test_dataloader(task_idx)
+                # loader.dataset.test_mode = True
+                self.data_module.predict_dataloader_mode = 'test'
+                self.data_module.predict_dataset_task_idx = task_idx
+
+            pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
             # collate data
             cls_score = []
             labels = []
@@ -777,7 +800,9 @@ class CILTrainer:
 
         self._current_task = tmp  # reset state
 
-    def _get_exemplar_class_means(self, task_idx, pipeline=''):
+    def _get_exemplar_class_means(self, task_idx,
+                                  # pipeline=''
+                                  ):
         # load class mean from file
         exemplar_class_mean_file = self.ckpt_dir / 'exemplar_class_mean_task_{}.pt'.format(task_idx)
         if exemplar_class_mean_file.exists():
@@ -786,12 +811,12 @@ class CILTrainer:
         # or extract class mean from exemplar
         else:
             print('Begin extract class mean from exemplar')
-            if pipeline == 'valid':
-                cfg = copy.deepcopy(self.config.data.val)
-            elif pipeline == 'test':
-                cfg = copy.deepcopy(self.config.data.test)
-            else:
-                cfg = copy.deepcopy(self.config.data.features_extraction)
+            # if pipeline == 'valid':
+            #     cfg = copy.deepcopy(self.config.data.val)
+            # elif pipeline == 'test':
+            #     cfg = copy.deepcopy(self.config.data.test)
+            # else:
+            #     cfg = copy.deepcopy(self.config.data.features_extraction)
                 # raise ValueError
 
             raw_str_list = []
@@ -804,16 +829,17 @@ class CILTrainer:
             with open(tmp_exemplars_file, 'w') as f:
                 f.write(raw_str)
 
-            cfg.ann_file = str(tmp_exemplars_file)
-            dataset = build_dataset(cfg)
-            dataset.test_mode = True
-
-            loader = DataLoader(dataset,
-                                batch_size=self.config.testing_videos_per_gpu,
-                                num_workers=self.config.testing_workers_per_gpu,
-                                pin_memory=True,
-                                shuffle=False
-                                )
+            # cfg = copy.deepcopy(self.config.data.features_extraction)
+            # cfg.ann_file = str(tmp_exemplars_file)
+            # dataset = build_dataset(cfg)
+            # dataset.test_mode = True
+            #
+            # loader = DataLoader(dataset,
+            #                     batch_size=self.config.testing_videos_per_gpu,
+            #                     num_workers=self.config.testing_workers_per_gpu,
+            #                     pin_memory=True,
+            #                     shuffle=False
+            #                     )
 
             trainer = pl.Trainer(gpus=self.config.gpu_ids,
                                  default_root_dir=self.config.work_dir,
@@ -823,19 +849,22 @@ class CILTrainer:
             self.cil_model.extract_repr = True
             self.cil_model.current_model.update_fc(self.num_classes())
 
+            self.data_module.predict_dataloader_mode = 'feature_extraction'
             pred_ = trainer.predict(model=self.cil_model,
-                                    dataloaders=loader)
-            repr = []
+                                    datamodule=self.data_module
+                                    # dataloaders=loader
+                                    )
+            repr_ = []
             for batch_data in pred_:
-                repr.append(batch_data['repr'])
-            repr = torch.cat(repr, dim=0)
-            repr = repr.reshape(-1, repr.size(1))
+                repr_.append(batch_data['repr_'])
+            repr_ = torch.cat(repr_, dim=0)
+            repr_ = repr_.reshape(-1, repr_.size(1))
 
             label = torch.cat([batch_data['label'] for batch_data in pred_], dim=0).squeeze(dim=1)
             class_means = []
             for class_idx in range(self.num_classes()):
                 indices = (label == class_idx).nonzero().squeeze()
-                class_means.append(torch.mean(repr[indices], dim=0))
+                class_means.append(torch.mean(repr_[indices], dim=0))
 
             class_means = torch.stack(class_means, dim=0)
             torch.save({'class_means': class_means}, exemplar_class_mean_file)
