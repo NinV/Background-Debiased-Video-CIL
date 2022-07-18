@@ -186,20 +186,23 @@ data = dict(
         ann_file='',                    # need to update this value before using
         bg_dir=background_dir,
         data_prefix=data_root,
-        pipeline=val_pipeline),
+        pipeline=val_pipeline,
+        test_mode=True),
     test=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
         bg_dir=background_dir,
         data_prefix=data_root,
-        pipeline=test_pipeline),
+        pipeline=test_pipeline,
+        test_mode=True),
 
     features_extraction=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
         bg_dir=background_dir,
         data_prefix=data_root,
-        pipeline=features_extraction_pipeline),
+        pipeline=features_extraction_pipeline,
+        test_mode=True),
     features_extraction_epochs=1,      # this value should be set to 1 if there's no randomness in pipeline
 
     exemplar=dict(
