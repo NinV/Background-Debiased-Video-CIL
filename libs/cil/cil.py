@@ -220,7 +220,7 @@ class CILDataModule(pl.LightningDataModule):
 
         elif self.predict_dataloader_mode == 'test':
             print('[predict_dataloader] mode:', self.predict_dataloader_mode)
-            loader = self.get_val_dataloader(self.predict_dataset_task_idx)
+            loader = self.get_test_dataloader(self.predict_dataset_task_idx)
             # return self.get_val_dataloader(self.predict_dataset_task_idx)
 
         elif self.predict_dataloader_mode == 'feature_extraction':
