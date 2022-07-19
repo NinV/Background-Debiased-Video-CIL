@@ -839,7 +839,12 @@ class CILTrainer:
             self.cil_model.to(device)
             for batch_idx, batch_data in tqdm(enumerate(loader), total=len(loader)):
                 batch_data['imgs'] = batch_data['imgs'].to(device)
-                batch_data['label'] = batch_data['label'].to(device)
                 pred_ = self.cil_model.predict_step(batch_data, batch_idx)
-                predictions.append(pred_)
+                pred_cpu = {}
+                for k, v in pred_.items():
+                    if isinstance(v, torch.Tensor):
+                        pred_cpu[k] = v.detach().cpu()
+                    else:
+                        pred_cpu[k] = v
+                predictions.append(pred_cpu)
         return predictions
