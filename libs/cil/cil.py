@@ -1,24 +1,18 @@
-import copy
 from typing import Optional, Union, List, Tuple, Dict
 import pathlib
 
-import torchmetrics.classification
-from yacs.config import CfgNode
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import StepLR, MultiStepLR
+import pytorch_lightning as pl
+import torchmetrics.classification
 from mmcv.runner import build_optimizer
 from mmcv.utils.config import Config as mmcvConfig
 from mmaction.datasets import build_dataset, RawframeDataset
 from mmaction.models import build_model
-# from mmaction.core import OutputHook
-from ..module_hooks import OutputHook
-import pytorch_lightning as pl
-from torchmetrics.classification import Accuracy
-from pytorch_lightning.callbacks import LearningRateMonitor
 
+from ..module_hooks import OutputHook
 from .memory_selection import Herding
 from ..utils import print_mean_accuracy, build_lr_scheduler
 from ..loader.comix_loader import BackgroundMixDataset
@@ -204,8 +198,8 @@ class CILDataModule(pl.LightningDataModule):
     # avoid override val_dataloader abstract method
     def get_val_dataloader(self, task_idx: int):
         return DataLoader(self.val_datasets[task_idx],
-                          batch_size=self.batch_size,
-                          num_workers=self.config.workers_per_gpu,
+                          batch_size=self.test_batch_size,
+                          num_workers=self.config.testing_workers_per_gpu,
                           pin_memory=True,
                           shuffle=False
                           )
@@ -221,17 +215,22 @@ class CILDataModule(pl.LightningDataModule):
     def predict_dataloader(self):
         if self.predict_dataloader_mode == 'val':
             print('[predict_dataloader] mode:', self.predict_dataloader_mode)
-            return self.get_val_dataloader(self.predict_dataset_task_idx)
+            loader = self.get_val_dataloader(self.predict_dataset_task_idx)
+            # return self.get_val_dataloader(self.predict_dataset_task_idx)
 
-        if self.predict_dataloader_mode == 'test':
+        elif self.predict_dataloader_mode == 'test':
             print('[predict_dataloader] mode:', self.predict_dataloader_mode)
-            return self.get_val_dataloader(self.predict_dataset_task_idx)
+            loader = self.get_val_dataloader(self.predict_dataset_task_idx)
+            # return self.get_val_dataloader(self.predict_dataset_task_idx)
 
-        if self.predict_dataloader_mode == 'feature_extraction':
+        elif self.predict_dataloader_mode == 'feature_extraction':
             print('[predict_dataloader] mode:', self.predict_dataloader_mode)
-            return self.features_extraction_dataloader()
+            loader = self.features_extraction_dataloader()
+            # return self.features_extraction_dataloader()
         else:
             raise ValueError
+        print('Number of videos:', len(loader.dataset.video_infos))
+        return loader
 
     def features_extraction_dataloader(self):
         """
@@ -273,12 +272,6 @@ class CILDataModule(pl.LightningDataModule):
         """
         copy data info from target then merge to source. This method is useful
         """
-
-        # if isinstance(targets, RawframeDataset):
-        #     source.video_infos.extend(targets.video_infos)
-        # else:
-        #     for target_ in targets:
-        #         source.video_infos.extend(target_.video_infos)
         if isinstance(targets, list):
             for target_ in targets:
                 source = self._merge_dataset(source, target_)
@@ -425,8 +418,6 @@ class BaseCIL(pl.LightningModule):
         else:
             losses['kd_loss'] = 0.
 
-        # loss = losses['loss_cls'] + losses['kd_loss']
-        # loss = 0
         batch_size = imgs.shape[0]
         for loss_name, loss_value in losses.items():
             self.log('train_' + loss_name, losses[loss_name], on_step=True, on_epoch=True, prog_bar=True, logger=True,
@@ -435,10 +426,6 @@ class BaseCIL(pl.LightningModule):
         loss = losses['kd_loss'] + losses['loss_cls']
         if 'loss_bg_mixed' in losses:
             loss += losses['loss_bg_mixed']
-        # self.log('train_loss_cls', losses['loss_cls'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
-        #          batch_size=batch_size)
-        # self.log('train_loss_kd', losses['kd_loss'], on_step=True, on_epoch=True, prog_bar=True, logger=True,
-        #          batch_size=batch_size)
         return loss
 
     def predict_step(self, batch_data, batch_idx, dataloader_idx: Optional[int] = None):
@@ -458,7 +445,7 @@ class BaseCIL(pl.LightningModule):
             assert result['repr'].size(0) == result['cls_score'].size(0)
         if self.extract_meta:
             for k, v in batch_data.items():
-                if k not in ['label', 'imgs']:
+                if k not in ['label', 'imgs', 'blended']:
                     result[k] = v
         return result
 
@@ -703,7 +690,7 @@ class CILTrainer:
         }
         return collated_prediction_with_meta
 
-    def _testing(self, use_validation_set=True, exemplar_class_means=None):
+    def _testing(self, val_test='test', exemplar_class_means=None):
         print('Begin testing')
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
@@ -717,16 +704,8 @@ class CILTrainer:
         cnn_accuracies = []
         nme_accuracies = []
         for task_idx in range(self.current_task + 1):
-            if use_validation_set:
-                # loader = self.data_module.get_val_dataloader(task_idx)
-                # loader.dataset.test_mode = True
-                self.data_module.predict_dataloader_mode = 'val'
-                self.data_module.predict_dataset_task_idx = task_idx
-            else:
-                # loader = self.data_module.get_test_dataloader(task_idx)
-                # loader.dataset.test_mode = True
-                self.data_module.predict_dataloader_mode = 'test'
-                self.data_module.predict_dataset_task_idx = task_idx
+            self.data_module.predict_dataloader_mode = val_test
+            self.data_module.predict_dataset_task_idx = task_idx
 
             pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
             # collate data
@@ -784,12 +763,11 @@ class CILTrainer:
             )
             if test_nme:
                 exemplar_class_means = self._get_exemplar_class_means(task_idx)
-                cnn_task_i_accuracies, nme_task_i_accuracies = self._testing(use_validation_set=False,
-                                                                             exemplar_class_means=exemplar_class_means)
+                cnn_task_i_accuracies, nme_task_i_accuracies = self._testing(exemplar_class_means=exemplar_class_means)
                 cnn_accuracies.append(cnn_task_i_accuracies)
                 nme_accuracies.append(nme_task_i_accuracies)
             else:
-                cnn_task_i_accuracies = self._testing(use_validation_set=False)
+                cnn_task_i_accuracies = self._testing()
                 cnn_accuracies.append(cnn_task_i_accuracies)
 
         print('CNN accuracies')
@@ -800,9 +778,7 @@ class CILTrainer:
 
         self._current_task = tmp  # reset state
 
-    def _get_exemplar_class_means(self, task_idx,
-                                  # pipeline=''
-                                  ):
+    def _get_exemplar_class_means(self, task_idx):
         # load class mean from file
         exemplar_class_mean_file = self.ckpt_dir / 'exemplar_class_mean_task_{}.pt'.format(task_idx)
         if exemplar_class_mean_file.exists():
@@ -811,14 +787,6 @@ class CILTrainer:
         # or extract class mean from exemplar
         else:
             print('Begin extract class mean from exemplar')
-            # if pipeline == 'valid':
-            #     cfg = copy.deepcopy(self.config.data.val)
-            # elif pipeline == 'test':
-            #     cfg = copy.deepcopy(self.config.data.test)
-            # else:
-            #     cfg = copy.deepcopy(self.config.data.features_extraction)
-                # raise ValueError
-
             raw_str_list = []
             for i in range(task_idx + 1):
                 with open(self.data_module.exemplar_dir / 'exemplar_task_{}.txt'.format(i), 'r') as f:
@@ -828,19 +796,6 @@ class CILTrainer:
             tmp_exemplars_file = self.data_module.exemplar_dir / 'tmp_exemplars.txt'
             with open(tmp_exemplars_file, 'w') as f:
                 f.write(raw_str)
-
-            # cfg = copy.deepcopy(self.config.data.features_extraction)
-            # cfg.ann_file = str(tmp_exemplars_file)
-            # dataset = build_dataset(cfg)
-            # dataset.test_mode = True
-            #
-            # loader = DataLoader(dataset,
-            #                     batch_size=self.config.testing_videos_per_gpu,
-            #                     num_workers=self.config.testing_workers_per_gpu,
-            #                     pin_memory=True,
-            #                     shuffle=False
-            #                     )
-
             trainer = pl.Trainer(gpus=self.config.gpu_ids,
                                  default_root_dir=self.config.work_dir,
                                  max_epochs=1,
@@ -852,7 +807,6 @@ class CILTrainer:
             self.data_module.predict_dataloader_mode = 'feature_extraction'
             pred_ = trainer.predict(model=self.cil_model,
                                     datamodule=self.data_module
-                                    # dataloaders=loader
                                     )
             repr_ = []
             for batch_data in pred_:
