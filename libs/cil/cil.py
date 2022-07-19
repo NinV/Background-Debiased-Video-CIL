@@ -647,7 +647,7 @@ class CILTrainer:
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.data.features_extraction_epochs,
                              logger=False,
-                             strategy='ddp'
+                             strategy='dp'
                              )
 
         # loader = self.data_module.features_extraction_dataloader()
@@ -697,7 +697,7 @@ class CILTrainer:
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.data.features_extraction_epochs,
                              logger=False,
-                             strategy='ddp'
+                             strategy='dp'
                              )
         if exemplar_class_means is not None:
             self.cil_model.extract_repr = True
@@ -802,7 +802,7 @@ class CILTrainer:
                                  default_root_dir=self.config.work_dir,
                                  max_epochs=1,
                                  logger=False,
-                                 strategy='ddp'
+                                 strategy='dp'
                                  )
             self.cil_model.extract_repr = True
             self.cil_model.current_model.update_fc(self.num_classes())
