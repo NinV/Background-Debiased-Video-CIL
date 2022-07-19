@@ -11,6 +11,7 @@ from mmcv.runner import build_optimizer
 from mmcv.utils.config import Config as mmcvConfig
 from mmaction.datasets import build_dataset, RawframeDataset
 from mmaction.models import build_model
+from tqdm import tqdm
 
 from ..module_hooks import OutputHook
 from .memory_selection import Herding
@@ -549,6 +550,7 @@ class CILTrainer:
                              # limit_train_batches=10,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # callbacks=[lr_monitor]
+                             enable_checkpointing=False
                              )
         trainer.fit(self.cil_model, self.data_module)
 
@@ -567,6 +569,7 @@ class CILTrainer:
                              max_epochs=self.config.cbf_num_epochs_per_task,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # limit_train_batches=10,
+                             enable_checkpointing=False
                              )
         self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
@@ -643,12 +646,12 @@ class CILTrainer:
         extract features for constructing exemplar
         """
         # predictor = pl.Trainer()
-        trainer = pl.Trainer(gpus=self.config.gpu_ids,
-                             default_root_dir=self.config.work_dir,
-                             max_epochs=self.config.data.features_extraction_epochs,
-                             logger=False,
-                             strategy='dp'
-                             )
+        # trainer = pl.Trainer(gpus=self.config.gpu_ids,
+        #                      default_root_dir=self.config.work_dir,
+        #                      max_epochs=self.config.data.features_extraction_epochs,
+        #                      logger=False,
+        #                      strategy='dp'
+        #                      )
 
         # loader = self.data_module.features_extraction_dataloader()
         self.cil_model.extract_repr = True  # to extract features
@@ -656,7 +659,8 @@ class CILTrainer:
         prediction_with_meta = []
         for _ in range(self.config.data.features_extraction_epochs):
             self.data_module.predict_dataloader_mode = 'feature_extraction'
-            pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
+            # pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
+            pred_ = self.single_gpu_predict(self.data_module.predict_dataloader())
 
             prediction_with_meta.append(pred_)
         self.cil_model.extract_repr = False  # reset flag
@@ -693,12 +697,12 @@ class CILTrainer:
 
     def _testing(self, val_test='test', exemplar_class_means=None):
         print('Begin testing')
-        trainer = pl.Trainer(gpus=self.config.gpu_ids,
-                             default_root_dir=self.config.work_dir,
-                             max_epochs=self.config.data.features_extraction_epochs,
-                             logger=False,
-                             strategy='dp'
-                             )
+        # trainer = pl.Trainer(gpus=self.config.gpu_ids,
+        #                      default_root_dir=self.config.work_dir,
+        #                      max_epochs=self.config.data.features_extraction_epochs,
+        #                      logger=False,
+        #                      strategy='dp'
+        #                      )
         if exemplar_class_means is not None:
             self.cil_model.extract_repr = True
         metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes(), multiclass=True)
@@ -709,7 +713,8 @@ class CILTrainer:
             self.data_module.predict_dataloader_mode = val_test
             self.data_module.predict_dataset_task_idx = task_idx
 
-            pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
+            # pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
+            pred_ = self.single_gpu_predict(self.data_module.predict_dataloader())
             # collate data
             cls_score = []
             labels = []
@@ -798,17 +803,18 @@ class CILTrainer:
             tmp_exemplars_file = self.data_module.exemplar_dir / 'tmp_exemplars.txt'
             with open(tmp_exemplars_file, 'w') as f:
                 f.write(raw_str)
-            trainer = pl.Trainer(gpus=self.config.gpu_ids,
-                                 default_root_dir=self.config.work_dir,
-                                 max_epochs=1,
-                                 logger=False,
-                                 strategy='dp'
-                                 )
+            # trainer = pl.Trainer(gpus=self.config.gpu_ids,
+            #                      default_root_dir=self.config.work_dir,
+            #                      max_epochs=1,
+            #                      logger=False,
+            #                      strategy='dp'
+            #                      )
             self.cil_model.extract_repr = True
             self.cil_model.current_model.update_fc(self.num_classes())
 
             self.data_module.predict_dataloader_mode = 'feature_extraction'
-            pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
+            # pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
+            pred_ = self.single_gpu_predict(self.data_module.predict_dataloader())
             repr_ = []
             for batch_data in pred_:
                 repr_.append(batch_data['repr_'])
@@ -824,3 +830,16 @@ class CILTrainer:
             class_means = torch.stack(class_means, dim=0)
             torch.save({'class_means': class_means}, exemplar_class_mean_file)
         return class_means
+
+    def single_gpu_predict(self, loader: DataLoader):
+        predictions = []
+        with torch.no_grad():
+            self.cil_model.current_model.eval()
+            device = torch.device('cuda')
+            self.cil_model.to(device)
+            for batch_idx, batch_data in tqdm(enumerate(loader), total=len(loader)):
+                batch_data['imgs'] = batch_data['imgs'].to(device)
+                pred_ = self.cil_model.predict_step(batch_data, batch_idx)
+                # print(pred_.keys())
+                predictions.append(pred_)
+        return predictions
