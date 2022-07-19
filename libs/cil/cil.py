@@ -380,9 +380,9 @@ class BaseCIL(pl.LightningModule):
     # others
     def _extract_repr(self):
         # https://mmaction2.readthedocs.io/en/latest/_modules/mmaction/models/heads/tsm_head.html#TSMHead
-        repr = self._repr_hook.get_layer_output(self._repr_module_name).flatten(1)
-        repr = repr.view(-1, self.current_model.cls_head.num_segments, repr.size(1))
-        repr_consensus = self.current_model.cls_head.consensus(repr).squeeze(1)
+        repr_ = self._repr_hook.get_layer_output(self._repr_module_name).flatten(1)
+        repr_ = repr_.view(-1, self.current_model.cls_head.num_segments, repr_.size(1))
+        repr_consensus = self.current_model.cls_head.consensus(repr_).squeeze(1)
         return repr_consensus
 
     # forwarding, training, validation and testing
@@ -435,14 +435,14 @@ class BaseCIL(pl.LightningModule):
                   'label': batch_data['label']
                   }
         if self.extract_repr:
-            repr = self._extract_repr()
+            repr_ = self._extract_repr()
             batch_size = batch_data['imgs'].size(0)
-            embedding_size = repr.size(-1)
-            repr = repr.view(batch_size, -1, embedding_size)
-            repr = F.normalize(repr, p=2, dim=-1)
-            repr = torch.mean(repr, dim=1, keepdim=False)
-            result['repr'] = repr
-            assert result['repr'].size(0) == result['cls_score'].size(0)
+            embedding_size = repr_.size(-1)
+            repr_ = repr_.view(batch_size, -1, embedding_size)
+            repr_ = F.normalize(repr_, p=2, dim=-1)
+            repr_ = torch.mean(repr_, dim=1, keepdim=False)
+            result['repr_'] = repr_
+            assert result['repr_'].size(0) == result['cls_score'].size(0)
         if self.extract_meta:
             for k, v in batch_data.items():
                 if k not in ['label', 'imgs', 'blended']:
@@ -724,15 +724,15 @@ class CILTrainer:
             cnn_accuracies.append(acc.item() * 100)
 
             if exemplar_class_means is not None:
-                repr = []
+                repr_ = []
                 for batch_data in pred_:
-                    repr.append(batch_data['repr'])
-                repr = torch.cat(repr, dim=0)
-                repr = repr.reshape(-1, repr.size(1))
+                    repr_.append(batch_data['repr_'])
+                repr_ = torch.cat(repr_, dim=0)
+                repr_ = repr_.reshape(-1, repr_.size(1))
 
-                batch_size, dims = repr.shape
+                batch_size, dims = repr_.shape
                 num_classes = exemplar_class_means.size(0)
-                repr_broadcast = repr.unsqueeze(dim=1).expand(batch_size, num_classes, dims)
+                repr_broadcast = repr_.unsqueeze(dim=1).expand(batch_size, num_classes, dims)
                 # dist.shape =  [batch_size, num_classes]
                 # dist = torch.linalg.vector_norm(repr_broadcast - exemplar_class_means, ord=2, dim=2)
                 # preds_nme = torch.argmin(dist, dim=1, keepdim=False)
