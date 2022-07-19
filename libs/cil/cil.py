@@ -603,7 +603,7 @@ class CILTrainer:
                 self.train_cbf()
 
             # testing
-            self._testing()
+            self._testing(val_test='val')
 
             # saving model weights
             save_weight_destination = self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)
