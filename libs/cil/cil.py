@@ -646,7 +646,8 @@ class CILTrainer:
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.data.features_extraction_epochs,
-                             logger=False
+                             logger=False,
+                             strategy='ddp'
                              )
 
         # loader = self.data_module.features_extraction_dataloader()
@@ -695,7 +696,8 @@ class CILTrainer:
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.data.features_extraction_epochs,
-                             logger=False
+                             logger=False,
+                             strategy='ddp'
                              )
         if exemplar_class_means is not None:
             self.cil_model.extract_repr = True
@@ -799,15 +801,14 @@ class CILTrainer:
             trainer = pl.Trainer(gpus=self.config.gpu_ids,
                                  default_root_dir=self.config.work_dir,
                                  max_epochs=1,
-                                 logger=False
+                                 logger=False,
+                                 strategy='ddp'
                                  )
             self.cil_model.extract_repr = True
             self.cil_model.current_model.update_fc(self.num_classes())
 
             self.data_module.predict_dataloader_mode = 'feature_extraction'
-            pred_ = trainer.predict(model=self.cil_model,
-                                    datamodule=self.data_module
-                                    )
+            pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
             repr_ = []
             for batch_data in pred_:
                 repr_.append(batch_data['repr_'])
