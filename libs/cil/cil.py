@@ -839,7 +839,7 @@ class CILTrainer:
             self.cil_model.to(device)
             for batch_idx, batch_data in tqdm(enumerate(loader), total=len(loader)):
                 batch_data['imgs'] = batch_data['imgs'].to(device)
+                batch_data['label'] = batch_data['label'].to(device)
                 pred_ = self.cil_model.predict_step(batch_data, batch_idx)
-                # print(pred_.keys())
                 predictions.append(pred_)
         return predictions
