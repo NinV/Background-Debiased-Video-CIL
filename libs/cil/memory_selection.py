@@ -38,7 +38,7 @@ class Herding:
             self.num_exemplars_per_class = budget_size
 
     def construct_exemplar(self, prediction_with_meta):
-        self._check_dimension(prediction_with_meta['repr'], prediction_with_meta['label'])
+        self._check_dimension(prediction_with_meta['repr_'], prediction_with_meta['label'])
         meta_by_class = self.split_meta_by_class(prediction_with_meta)
         exemplar_meta = {}
         with torch.no_grad():
@@ -47,7 +47,7 @@ class Herding:
                                       'dist': []
                                       }
 
-                features = meta['repr']
+                features = meta['repr_']
                 if self.storing_methods == 'videos':
                     if features.size(1) == 1:
                         features = features.squeeze(dim=1)
@@ -140,7 +140,7 @@ class Herding:
                 'clip_len': prediction_with_meta['clip_len'][indices],
                 'num_clips': prediction_with_meta['num_clips'][indices],
                 'frame_inds': prediction_with_meta['frame_inds'][indices],
-                'repr': prediction_with_meta['repr'][indices],
+                'repr_': prediction_with_meta['repr_'][indices],
                 'cls_score': prediction_with_meta['cls_score'][indices],
             }
         return meta_by_class
