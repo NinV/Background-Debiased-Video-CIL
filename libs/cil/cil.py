@@ -1,4 +1,5 @@
-from typing import Optional, Union, List, Tuple, Dict
+from typing import Optional, Union, List, Tuple, Dict, Any
+import os
 import pathlib
 
 import torch
@@ -6,11 +7,13 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import BasePredictionWriter
 import torchmetrics.classification
 from mmcv.runner import build_optimizer
 from mmcv.utils.config import Config as mmcvConfig
 from mmaction.datasets import build_dataset, RawframeDataset
 from mmaction.models import build_model
+from tqdm import tqdm
 
 from ..module_hooks import OutputHook
 from .memory_selection import Herding
@@ -193,7 +196,9 @@ class CILDataModule(pl.LightningDataModule):
                           batch_size=self.batch_size,
                           num_workers=self.config.workers_per_gpu,
                           pin_memory=True,
-                          shuffle=True)
+                          shuffle=True,
+                          persistent_workers=True
+                          )
 
     # avoid override val_dataloader abstract method
     def get_val_dataloader(self, task_idx: int):
@@ -201,7 +206,8 @@ class CILDataModule(pl.LightningDataModule):
                           batch_size=self.test_batch_size,
                           num_workers=self.config.testing_workers_per_gpu,
                           pin_memory=True,
-                          shuffle=False
+                          shuffle=False,
+                          persistent_workers=True
                           )
 
     def get_test_dataloader(self, task_idx: int):
@@ -209,7 +215,8 @@ class CILDataModule(pl.LightningDataModule):
                           batch_size=self.test_batch_size,
                           num_workers=self.config.testing_workers_per_gpu,
                           pin_memory=True,
-                          shuffle=False
+                          shuffle=False,
+                          persistent_workers=True
                           )
 
     def predict_dataloader(self):
@@ -242,7 +249,8 @@ class CILDataModule(pl.LightningDataModule):
                           batch_size=self.batch_size,
                           num_workers=self.config.workers_per_gpu,
                           pin_memory=True,
-                          shuffle=False
+                          shuffle=False,
+                          persistent_workers=True
                           )
 
     def create_exemplar_ann_file(self, exemplar_meta: dict, task_idx=-1) -> str:
@@ -549,6 +557,7 @@ class CILTrainer:
                              # limit_train_batches=10,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # callbacks=[lr_monitor]
+                             enable_checkpointing=False
                              )
         trainer.fit(self.cil_model, self.data_module)
 
@@ -567,6 +576,7 @@ class CILTrainer:
                              max_epochs=self.config.cbf_num_epochs_per_task,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # limit_train_batches=10,
+                             enable_checkpointing=False
                              )
         self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
@@ -642,21 +652,12 @@ class CILTrainer:
         """
         extract features for constructing exemplar
         """
-        # predictor = pl.Trainer()
-        trainer = pl.Trainer(gpus=self.config.gpu_ids,
-                             default_root_dir=self.config.work_dir,
-                             max_epochs=self.config.data.features_extraction_epochs,
-                             logger=False,
-                             strategy='dp'
-                             )
-
-        # loader = self.data_module.features_extraction_dataloader()
         self.cil_model.extract_repr = True  # to extract features
         self.cil_model.extract_meta = True  # and other meta data
         prediction_with_meta = []
         for _ in range(self.config.data.features_extraction_epochs):
             self.data_module.predict_dataloader_mode = 'feature_extraction'
-            pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
+            pred_ = self.predict()
 
             prediction_with_meta.append(pred_)
         self.cil_model.extract_repr = False  # reset flag
@@ -693,12 +694,6 @@ class CILTrainer:
 
     def _testing(self, val_test='test', exemplar_class_means=None):
         print('Begin testing')
-        trainer = pl.Trainer(gpus=self.config.gpu_ids,
-                             default_root_dir=self.config.work_dir,
-                             max_epochs=self.config.data.features_extraction_epochs,
-                             logger=False,
-                             strategy='dp'
-                             )
         if exemplar_class_means is not None:
             self.cil_model.extract_repr = True
         metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes(), multiclass=True)
@@ -709,7 +704,7 @@ class CILTrainer:
             self.data_module.predict_dataloader_mode = val_test
             self.data_module.predict_dataset_task_idx = task_idx
 
-            pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
+            pred_ = self.predict()
             # collate data
             cls_score = []
             labels = []
@@ -798,17 +793,12 @@ class CILTrainer:
             tmp_exemplars_file = self.data_module.exemplar_dir / 'tmp_exemplars.txt'
             with open(tmp_exemplars_file, 'w') as f:
                 f.write(raw_str)
-            trainer = pl.Trainer(gpus=self.config.gpu_ids,
-                                 default_root_dir=self.config.work_dir,
-                                 max_epochs=1,
-                                 logger=False,
-                                 strategy='dp'
-                                 )
+
             self.cil_model.extract_repr = True
             self.cil_model.current_model.update_fc(self.num_classes())
 
             self.data_module.predict_dataloader_mode = 'feature_extraction'
-            pred_ = trainer.predict(model=self.cil_model, datamodule=self.data_module)
+            pred_ = self.predict()
             repr_ = []
             for batch_data in pred_:
                 repr_.append(batch_data['repr_'])
@@ -824,3 +814,37 @@ class CILTrainer:
             class_means = torch.stack(class_means, dim=0)
             torch.save({'class_means': class_means}, exemplar_class_mean_file)
         return class_means
+
+    def predict(self):
+        writer_tmp_dir = self.work_dir / 'tmp'
+        writer_tmp_dir.mkdir(exist_ok=True)
+        predict_writer = PredictWriter(writer_tmp_dir, write_interval='epoch')
+        trainer = pl.Trainer(gpus=self.config.gpu_ids,
+                             default_root_dir=self.config.work_dir,
+                             max_epochs=1,
+                             logger=False,
+                             enable_checkpointing=False,
+                             strategy='ddp_spawn',
+                             callbacks=[predict_writer],
+                             # limit_predict_batches=10
+                             )
+        trainer.predict(self.cil_model, datamodule=self.data_module)
+        predictions = []
+        for f in writer_tmp_dir.glob('predictions_rank_*'):
+            predictions.extend(torch.load(f))
+
+        print("Number of predictions:", len(predictions))
+        return predictions
+
+
+class PredictWriter(BasePredictionWriter):
+    def __init__(self, output_dir: pathlib.Path, write_interval: str):
+        super().__init__(write_interval)
+        self.output_dir = output_dir
+
+    def write_on_epoch_end(
+        self, trainer, pl_module: pl.LightningModule, predictions: List[Any], batch_indices: List[Any]
+    ):
+        save_location = self.output_dir / "predictions_rank_{}.pt".format(trainer.global_rank)
+        torch.save(predictions[0], save_location)
+        print("Predictions saved at", save_location)

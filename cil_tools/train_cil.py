@@ -16,6 +16,8 @@ def parse_args():
     parser.add_argument('--videos_per_gpu', type=int)
     parser.add_argument('--workers_per_gpu', type=int)
     parser.add_argument('--accumulate_grad_batches', type=int)
+    parser.add_argument('--testing_videos_per_gpu', type=int)
+    parser.add_argument('--testing_workers_per_gpu', type=int)
 
     parser.add_argument('--gpu_ids', type=int, nargs='*', help='ids of gpus to use')
     parser.add_argument(
