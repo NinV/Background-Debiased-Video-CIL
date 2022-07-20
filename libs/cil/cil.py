@@ -196,7 +196,9 @@ class CILDataModule(pl.LightningDataModule):
                           batch_size=self.batch_size,
                           num_workers=self.config.workers_per_gpu,
                           pin_memory=True,
-                          shuffle=True)
+                          shuffle=True,
+                          persistent_workers=True
+                          )
 
     # avoid override val_dataloader abstract method
     def get_val_dataloader(self, task_idx: int):
