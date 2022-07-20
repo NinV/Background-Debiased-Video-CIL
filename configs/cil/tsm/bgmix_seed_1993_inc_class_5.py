@@ -99,7 +99,7 @@ cbf_optimizer = dict(
     lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)
-cbf_lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20], gamma=0.1))
+cbf_lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0.1))
 
 # dataset settings
 data_root = 'data/ucf101/rawframes/'
