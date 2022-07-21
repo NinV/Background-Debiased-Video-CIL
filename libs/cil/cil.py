@@ -1,6 +1,7 @@
 from typing import Optional, Union, List, Tuple, Dict, Any
-import os
 import pathlib
+import shutil
+import copy
 
 import torch
 import torch.nn as nn
@@ -13,7 +14,6 @@ from mmcv.runner import build_optimizer
 from mmcv.utils.config import Config as mmcvConfig
 from mmaction.datasets import build_dataset, RawframeDataset
 from mmaction.models import build_model
-from tqdm import tqdm
 
 from ..module_hooks import OutputHook
 from .memory_selection import Herding
@@ -122,7 +122,7 @@ class CILDataModule(pl.LightningDataModule):
             self.task_splits_ann_files['val'].append(
                 ann_files_dir / self.config.cil_ann_file_template.format('val', task_i))
 
-    def collect_exemplar_fron_work_dir(self):
+    def collect_exemplar_from_work_dir(self):
         for task_idx in range(self.current_task):
             ann_file = self.exemplar_dir / 'exemplar_task_{}.txt'.format(task_idx)
             if ann_file.exists():
@@ -218,40 +218,69 @@ class CILDataModule(pl.LightningDataModule):
                           shuffle=False,
                           persistent_workers=True
                           )
-
-    def predict_dataloader(self):
-        if self.predict_dataloader_mode == 'val':
-            print('[predict_dataloader] mode:', self.predict_dataloader_mode)
-            loader = self.get_val_dataloader(self.predict_dataset_task_idx)
-            # return self.get_val_dataloader(self.predict_dataset_task_idx)
-
-        elif self.predict_dataloader_mode == 'test':
-            print('[predict_dataloader] mode:', self.predict_dataloader_mode)
-            loader = self.get_test_dataloader(self.predict_dataset_task_idx)
-            # return self.get_val_dataloader(self.predict_dataset_task_idx)
-
-        elif self.predict_dataloader_mode == 'feature_extraction':
-            print('[predict_dataloader] mode:', self.predict_dataloader_mode)
-            loader = self.features_extraction_dataloader()
-            # return self.features_extraction_dataloader()
-        else:
-            raise ValueError
-        print('Number of videos:', len(loader.dataset.video_infos))
-        return loader
-
-    def features_extraction_dataloader(self):
+    
+    def features_extraction_dataloader_on_train_dataset(self, task_idx: int):
         """
         extracting features for memory selection
         """
-        self.config.data.features_extraction.ann_file = str(self.task_splits_ann_files['train'][self.current_task])
+        self.config.data.features_extraction.ann_file = str(self.task_splits_ann_files['train'][task_idx])
         self.features_extraction_dataset = build_dataset(self.config.data.features_extraction)
         return DataLoader(self.features_extraction_dataset,
-                          batch_size=self.batch_size,
+                          batch_size=self.test_batch_size,
                           num_workers=self.config.workers_per_gpu,
                           pin_memory=True,
                           shuffle=False,
                           persistent_workers=True
                           )
+
+    def features_extraction_dataloader_on_exemplar(self, task_idx: int):
+        raw_str_list = []
+        for i in range(task_idx + 1):
+            with open(self.exemplar_dir / 'exemplar_task_{}.txt'.format(i), 'r') as f:
+                raw_str_list.append(f.read().strip())
+
+        raw_str = '\n'.join(raw_str_list)
+        tmp_exemplars_file = self.exemplar_dir / 'tmp_exemplars.txt'
+        with open(tmp_exemplars_file, 'w') as f:
+            f.write(raw_str)
+
+        cfg = copy.deepcopy(self.config.data.features_extraction)
+        cfg.ann_file = str(tmp_exemplars_file)
+        dataset = build_dataset(cfg)
+        dataset.test_mode = True
+        return DataLoader(dataset,
+                          batch_size=self.test_batch_size,
+                          num_workers=self.config.workers_per_gpu,
+                          pin_memory=True,
+                          shuffle=False,
+                          persistent_workers=True
+                          )
+
+    def predict_dataloader(self):
+        if self.predict_dataloader_mode == 'val':
+            print('[predict_dataloader] mode: {}, task: {}'.format(self.predict_dataloader_mode, 
+                                                                   self.predict_dataset_task_idx))
+            loader = self.get_val_dataloader(self.predict_dataset_task_idx)
+
+        elif self.predict_dataloader_mode == 'test':
+            print('[predict_dataloader] mode: {}, task: {}'.format(self.predict_dataloader_mode,
+                                                                   self.predict_dataset_task_idx))
+            loader = self.get_test_dataloader(self.predict_dataset_task_idx)
+
+        elif self.predict_dataloader_mode == 'feature_extraction_on_train_dataset':
+            print('[predict_dataloader] mode: {}, task: {}'.format(self.predict_dataloader_mode,
+                                                                   self.predict_dataset_task_idx))
+            loader = self.features_extraction_dataloader_on_train_dataset(self.predict_dataset_task_idx)
+
+        elif self.predict_dataloader_mode == 'feature_extraction_on_exemplar':
+            print('[predict_dataloader] mode: {}, task: {}'.format(self.predict_dataloader_mode,
+                                                                   self.predict_dataset_task_idx))
+            loader = self.features_extraction_dataloader_on_exemplar(self.predict_dataset_task_idx)
+
+        else:
+            raise ValueError
+        print('Number of videos:', len(loader.dataset.video_infos))
+        return loader
 
     def create_exemplar_ann_file(self, exemplar_meta: dict, task_idx=-1) -> str:
         if task_idx == -1:  # automatically infer the current task index using internal state from controller
@@ -488,7 +517,7 @@ class CILTrainer:
         else:
             self.data_module.collect_ann_files_from_work_dir()
             try:
-                self.data_module.collect_exemplar_fron_work_dir()
+                self.data_module.collect_exemplar_from_work_dir()
             except FileNotFoundError:
                 for i in range(len(self.data_module.exemplar_datasets), self.starting_task):
                     self._current_task = i
@@ -612,8 +641,10 @@ class CILTrainer:
             if self._current_task > 0 and self.config.use_cbf:
                 self.train_cbf()
 
+            exemplar_class_means = self._get_exemplar_class_means(self.current_task)
+
             # testing
-            self._testing(val_test='val')
+            self._testing(val_test='val', exemplar_class_means=exemplar_class_means)
 
             # saving model weights
             save_weight_destination = self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)
@@ -656,7 +687,7 @@ class CILTrainer:
         self.cil_model.extract_meta = True  # and other meta data
         prediction_with_meta = []
         for _ in range(self.config.data.features_extraction_epochs):
-            self.data_module.predict_dataloader_mode = 'feature_extraction'
+            self.data_module.predict_dataloader_mode = 'feature_extraction_on_train_dataset'
             pred_ = self.predict()
 
             prediction_with_meta.append(pred_)
@@ -775,29 +806,21 @@ class CILTrainer:
 
         self._current_task = tmp  # reset state
 
-    def _get_exemplar_class_means(self, task_idx):
+    def _get_exemplar_class_means(self, task_idx: int):
         # load class mean from file
         exemplar_class_mean_file = self.ckpt_dir / 'exemplar_class_mean_task_{}.pt'.format(task_idx)
         if exemplar_class_mean_file.exists():
+            print('Load class means (exemplar) from:', exemplar_class_mean_file)
             class_means = torch.load(exemplar_class_mean_file)['class_means']
 
         # or extract class mean from exemplar
         else:
             print('Begin extract class mean from exemplar')
-            raw_str_list = []
-            for i in range(task_idx + 1):
-                with open(self.data_module.exemplar_dir / 'exemplar_task_{}.txt'.format(i), 'r') as f:
-                    raw_str_list.append(f.read().strip())
-
-            raw_str = '\n'.join(raw_str_list)
-            tmp_exemplars_file = self.data_module.exemplar_dir / 'tmp_exemplars.txt'
-            with open(tmp_exemplars_file, 'w') as f:
-                f.write(raw_str)
-
             self.cil_model.extract_repr = True
             self.cil_model.current_model.update_fc(self.num_classes())
 
-            self.data_module.predict_dataloader_mode = 'feature_extraction'
+            self.data_module.predict_dataloader_mode = 'feature_extraction_on_exemplar'
+            self.data_module.predict_dataset_task_idx = task_idx
             pred_ = self.predict()
             repr_ = []
             for batch_data in pred_:
@@ -832,8 +855,10 @@ class CILTrainer:
         predictions = []
         for f in writer_tmp_dir.glob('predictions_rank_*'):
             predictions.extend(torch.load(f))
-
+        
         print("Number of predictions:", len(predictions))
+        print("removing", writer_tmp_dir)
+        shutil.rmtree(writer_tmp_dir)
         return predictions
 
 
