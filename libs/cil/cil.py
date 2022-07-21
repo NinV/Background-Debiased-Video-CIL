@@ -586,7 +586,8 @@ class CILTrainer:
                              # limit_train_batches=10,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # callbacks=[lr_monitor]
-                             enable_checkpointing=False
+                             enable_checkpointing=False,
+                             strategy='ddp_spawn'
                              )
         trainer.fit(self.cil_model, self.data_module)
 
@@ -605,7 +606,8 @@ class CILTrainer:
                              max_epochs=self.config.cbf_num_epochs_per_task,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # limit_train_batches=10,
-                             enable_checkpointing=False
+                             enable_checkpointing=False,
+                             strategy='ddp_spawn'
                              )
         self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
@@ -688,6 +690,7 @@ class CILTrainer:
         prediction_with_meta = []
         for _ in range(self.config.data.features_extraction_epochs):
             self.data_module.predict_dataloader_mode = 'feature_extraction_on_train_dataset'
+            self.data_module.predict_dataset_task_idx = self.current_task
             pred_ = self.predict()
 
             prediction_with_meta.append(pred_)
