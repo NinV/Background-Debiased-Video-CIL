@@ -486,6 +486,10 @@ class BaseCIL(pl.LightningModule):
                     result[k] = v
         return result
 
+    def on_train_epoch_end(self) -> None:
+        if self.current_epoch >= 30 and (self.current_epoch + 1) % 2 == 0:
+            self.trainer.save_checkpoint(self.controller.ckpt_dir / 'task_{}_epoch_{}.pt'.format(self.controller.current_task,
+                                                                                                 self.current_epoch))
 
 class CILTrainer:
     def __init__(self, config, dump_config=True):
