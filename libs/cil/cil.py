@@ -498,7 +498,7 @@ class CILTrainer:
         self._current_task = self.starting_task
         self.num_epoch_per_task = config.num_epochs_per_task
         self.task_splits = config.task_splits
-        self.num_tasks = len(config.task_splits)
+        self.num_tasks = min(len(config.task_splits), config.ending_task + 1)
         self.max_epochs = self.num_tasks * self.num_epoch_per_task
 
         self.data_module = CILDataModule(config)
