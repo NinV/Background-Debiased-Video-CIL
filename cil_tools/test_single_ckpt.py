@@ -37,7 +37,7 @@ def main():
     config.merge_from_dict(cfg_dict)
     config.ending_task = config.starting_task
     trainer = CILTrainer(config, dump_config=False)
-    trainer.cil_testing(test_nme=True)
+    trainer.single_ckpt_testing(ckpt_file=config.ckpt, test_nme=True)
 
 
 if __name__ == '__main__':

@@ -814,6 +814,35 @@ class CILTrainer:
 
         self._current_task = tmp  # reset state
 
+    def single_ckpt_testing(self, ckpt_file: str, test_nme=True):
+        print("Load ckpt from",  ckpt_file)
+        self.cil_model.load_state_dict(torch.load(ckpt_file, map_location='cuda:0')['state_dict'])
+
+        if test_nme:
+            print('Create exemplar')
+            class_indices = [self.data_module.ori_idx_to_inc_idx[idx] for idx in self.task_splits[self.current_task]]
+            manager = Herding(budget_size=self.config.budget_size,
+                              class_indices=class_indices,
+                              cosine_distance=True,
+                              storing_methods=self.config.storing_methods,
+                              budget_type=self.config.budget_type)
+            prediction_with_meta = self._extract_features_for_constructing_exemplar()
+            exemplar_meta = manager.construct_exemplar(prediction_with_meta)
+
+            exemplar_class_means = [exemplar_meta[class_idx]['class_mean'] for class_idx in range(len(exemplar_meta))]
+            exemplar_class_means = torch.stack(exemplar_class_means, dim=0).squeeze(1)
+        else:
+            exemplar_class_means = None
+
+        # build test datasets
+        for task_idx in range(len(self.config.task_splits)):
+            self._current_task = task_idx
+            self.data_module.config.data.test.ann_file = str(
+                self.data_module.task_splits_ann_files['val'][self.current_task])
+            self.data_module.test_datasets.append(build_dataset(self.config.data.test))
+        self._current_task = self.ending_task
+        self._testing(val_test='test', exemplar_class_means=exemplar_class_means)
+
     def _get_exemplar_class_means(self, task_idx: int):
         # load class mean from file
         exemplar_class_mean_file = self.ckpt_dir / 'exemplar_class_mean_task_{}.pt'.format(task_idx)
