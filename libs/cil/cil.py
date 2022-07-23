@@ -491,6 +491,7 @@ class BaseCIL(pl.LightningModule):
             self.trainer.save_checkpoint(self.controller.ckpt_dir / 'task_{}_epoch_{}.pt'.format(self.controller.current_task,
                                                                                                  self.current_epoch))
 
+
 class CILTrainer:
     def __init__(self, config, dump_config=True):
         self.config = config
@@ -498,11 +499,11 @@ class CILTrainer:
 
         # class incremental learning setting
         self.starting_task = config.starting_task
-        # self.ending_task = 0
         self._current_task = self.starting_task
         self.num_epoch_per_task = config.num_epochs_per_task
         self.task_splits = config.task_splits
         self.num_tasks = min(len(config.task_splits), config.ending_task + 1)
+        self.ending_task = config.ending_task       # TODO: fix this later
         self.max_epochs = self.num_tasks * self.num_epoch_per_task
 
         self.data_module = CILDataModule(config)
@@ -806,10 +807,10 @@ class CILTrainer:
                 cnn_accuracies.append(cnn_task_i_accuracies)
 
         print('CNN accuracies')
-        print(print_mean_accuracy(cnn_accuracies, [len(class_indices) for class_indices in self.task_splits]))
+        print(print_mean_accuracy(cnn_accuracies, [len(class_indices) for class_indices in self.task_splits[self.starting_task: self.ending_task+1]]))
         if test_nme:
             print('NME accuracies')
-            print(print_mean_accuracy(nme_accuracies, [len(class_indices) for class_indices in self.task_splits]))
+            print(print_mean_accuracy(nme_accuracies, [len(class_indices) for class_indices in self.task_splits[self.starting_task: self.ending_task+1]]))
 
         self._current_task = tmp  # reset state
 
