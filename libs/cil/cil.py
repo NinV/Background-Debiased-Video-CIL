@@ -486,6 +486,11 @@ class BaseCIL(pl.LightningModule):
                     result[k] = v
         return result
 
+    def on_train_epoch_end(self) -> None:
+        if self.current_epoch >= 30 and (self.current_epoch + 1) % 2 == 0:
+            self.trainer.save_checkpoint(self.controller.ckpt_dir / 'task_{}_epoch_{}.pt'.format(self.controller.current_task,
+                                                                                                 self.current_epoch))
+
 
 class CILTrainer:
     def __init__(self, config, dump_config=True):
@@ -494,11 +499,11 @@ class CILTrainer:
 
         # class incremental learning setting
         self.starting_task = config.starting_task
-        # self.ending_task = 0
         self._current_task = self.starting_task
         self.num_epoch_per_task = config.num_epochs_per_task
         self.task_splits = config.task_splits
-        self.num_tasks = len(config.task_splits)
+        self.num_tasks = min(len(config.task_splits), config.ending_task + 1)
+        self.ending_task = config.ending_task       # TODO: fix this later
         self.max_epochs = self.num_tasks * self.num_epoch_per_task
 
         self.data_module = CILDataModule(config)
@@ -802,12 +807,42 @@ class CILTrainer:
                 cnn_accuracies.append(cnn_task_i_accuracies)
 
         print('CNN accuracies')
-        print(print_mean_accuracy(cnn_accuracies, [len(class_indices) for class_indices in self.task_splits]))
+        print(print_mean_accuracy(cnn_accuracies, [len(class_indices) for class_indices in self.task_splits[self.starting_task: self.ending_task+1]]))
         if test_nme:
             print('NME accuracies')
-            print(print_mean_accuracy(nme_accuracies, [len(class_indices) for class_indices in self.task_splits]))
+            print(print_mean_accuracy(nme_accuracies, [len(class_indices) for class_indices in self.task_splits[self.starting_task: self.ending_task+1]]))
 
         self._current_task = tmp  # reset state
+
+    def single_ckpt_testing(self, ckpt_file: str, test_nme=True):
+        print("Load ckpt from",  ckpt_file)
+        # self.cil_model.load_state_dict(torch.load(ckpt_file, map_location='cuda:0')['state_dict'])
+        self.cil_model = BaseCIL.load_from_checkpoint(checkpoint_path=ckpt_file, config=self.config)
+
+        if test_nme:
+            print('Create exemplar')
+            class_indices = [self.data_module.ori_idx_to_inc_idx[idx] for idx in self.task_splits[self.current_task]]
+            manager = Herding(budget_size=self.config.budget_size,
+                              class_indices=class_indices,
+                              cosine_distance=True,
+                              storing_methods=self.config.storing_methods,
+                              budget_type=self.config.budget_type)
+            prediction_with_meta = self._extract_features_for_constructing_exemplar()
+            exemplar_meta = manager.construct_exemplar(prediction_with_meta)
+
+            exemplar_class_means = [exemplar_meta[class_idx]['class_mean'] for class_idx in range(len(exemplar_meta))]
+            exemplar_class_means = torch.stack(exemplar_class_means, dim=0).squeeze(1)
+        else:
+            exemplar_class_means = None
+
+        # build test datasets
+        for task_idx in range(len(self.config.task_splits)):
+            self._current_task = task_idx
+            self.data_module.config.data.test.ann_file = str(
+                self.data_module.task_splits_ann_files['val'][self.current_task])
+            self.data_module.test_datasets.append(build_dataset(self.config.data.test))
+        self._current_task = self.ending_task
+        self._testing(val_test='test', exemplar_class_means=exemplar_class_means)
 
     def _get_exemplar_class_means(self, task_idx: int):
         # load class mean from file
