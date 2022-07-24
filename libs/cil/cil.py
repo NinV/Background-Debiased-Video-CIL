@@ -816,8 +816,7 @@ class CILTrainer:
 
     def single_ckpt_testing(self, ckpt_file: str, test_nme=True):
         print("Load ckpt from",  ckpt_file)
-        # self.cil_model.load_state_dict(torch.load(ckpt_file, map_location='cuda:0')['state_dict'])
-        self.cil_model = BaseCIL.load_from_checkpoint(checkpoint_path=ckpt_file, config=self.config)
+        self.cil_model.load_state_dict(torch.load(ckpt_file, map_location='cuda:0')['state_dict'])
 
         if test_nme:
             print('Create exemplar')
