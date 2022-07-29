@@ -176,7 +176,7 @@ class CILTSMOptimizerConstructor(DefaultOptimizerConstructor):
         params.append({'params': bn, 'lr': self.base_lr, 'weight_decay': 0})
         params.append({
             'params': lr5_weight,
-            'lr': self.base_lr * 5,
+            'lr': self.base_lr * 0.2,
             'weight_decay': self.base_wd
         })
         params.append({
