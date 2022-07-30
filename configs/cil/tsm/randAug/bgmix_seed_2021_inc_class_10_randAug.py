@@ -17,13 +17,13 @@ testing_workers_per_gpu = 2
 work_dir = 'work_dirs/bgmix_seed_1000_inc_class_10'
 
 
-task_splits = [[37, 97, 56, 55, 33, 84, 3, 4, 72, 59, 66, 48, 65, 91, 99, 39, 34, 22, 67, 74, 19, 35, 9, 86, 88, 63,
-                85, 38, 54, 25, 57, 62, 83, 76, 6, 13, 2, 53, 8, 24, 44, 12, 100, 29, 5, 17, 15, 73, 47, 27, 46],
-               [98, 96, 18, 90, 75, 31, 95, 49, 43, 78],
-               [23, 68, 16, 7, 26, 21, 50, 70, 32, 52],
-               [11, 69, 93, 14, 79, 10, 80, 77, 81, 28],
-               [82, 30, 20, 41, 58, 42, 60, 36, 40, 45],
-               [89, 0, 61, 1, 92, 94, 64, 71, 87, 51]]
+task_splits = [[90, 2, 46, 4, 78, 8, 32, 22, 13, 60, 47, 80, 75, 74, 82, 56, 51, 30, 6, 35, 92, 28, 37, 84, 3, 23, 59,
+                98, 61, 34, 68, 97, 45, 58, 31, 76, 72, 55, 81, 20, 43, 73, 77, 39, 69, 65, 9, 95, 27, 100, 67],
+               [17, 71, 96, 64, 11, 53, 89, 42, 40, 15],
+               [83, 18, 99, 19, 36, 10, 25, 93, 41, 87],
+               [14, 38, 79, 5, 52, 54, 50, 16, 49, 63],
+               [48, 66, 26, 1, 7, 33, 88, 70, 12, 24],
+               [21, 29, 91, 62, 44, 86, 94, 0, 57, 85]]
 
 
 # select one of ['base', 'oracle', 'finetune']
@@ -76,8 +76,8 @@ kd_exemplar_only = False
 # cil optimizer and lr_scheduler
 optimizer = dict(
     type='SGD',
-    constructor='CILTSMOptimizerConstructor',
-    paramwise_cfg=dict(fc_lr5=True),
+    constructor='CILTSMOptimizerConstructorImprovised',
+    paramwise_cfg=dict(fc_lr_scale_factor=5.0),
     lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)
@@ -90,8 +90,8 @@ lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0
 cbf_num_epochs_per_task = 50
 cbf_optimizer = dict(
     type='SGD',
-    constructor='CILTSMOptimizerConstructor',
-    paramwise_cfg=dict(fc_lr5=True),
+    constructor='CILTSMOptimizerConstructorImprovised',
+    paramwise_cfg=dict(fc_lr_scale_factor=0.2),
     lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)

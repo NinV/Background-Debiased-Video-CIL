@@ -184,3 +184,110 @@ class CILTSMOptimizerConstructor(DefaultOptimizerConstructor):
             'lr': self.base_lr * 10,
             'weight_decay': 0
         })
+
+
+@OPTIMIZER_BUILDERS.register_module()
+class CILTSMOptimizerConstructorImprovised(DefaultOptimizerConstructor):
+    """Modification of default Optimizer constructor in TSM model.
+    Similar to CILTSMOptimizerConstructor
+
+    This constructor builds optimizer in different ways from CILTSMOptimizerConstructor.
+    1. Use "fc_lr_scale_factor" as learning rate multiplier for the classifier layer
+
+        default setting for TSM model with dense layer as classifier: fc_lr_scale_factor=5.0
+        When using LSC as classification head:
+            Use high learning rate for classifier help model converge faster, very useful when using strong
+            data augmentation
+            In CBF step, lowering the classifier learning often results better NME accuracy while retain CNN accuracy
+            high - low learning rate for classification head is a trade-off between previous task and more recent task
+            Recommend:
+                   fc_lr_scale_factor=5.0 when training with strong data augmentation, initial task and incremental
+                   training step
+                   fc_lr_scale_factor=[1.0, 0.2] for cbf steps
+
+
+    """
+
+    def add_params(self, params, model):
+        """Add parameters and their corresponding lr and wd to the params.
+
+        Args:
+            params (list): The list to be modified, containing all parameter
+                groups and their corresponding lr and wd configurations.
+            model (nn.Module): The model to be trained with the optimizer.
+        """
+        # use fc_lr5 to determine whether to specify higher multi-factor
+        # for fc layer weights and bias.
+        fc_lr_scale_factor = self.paramwise_cfg['fc_lr_scale_factor']
+        first_conv_weight = []
+        first_conv_bias = []
+        normal_weight = []
+        normal_bias = []
+        lr5_weight = []
+        lr10_bias = []
+        bn = []
+
+        conv_cnt = 0
+
+        for m in model.modules():
+            if isinstance(m, _ConvNd):
+                m_params = list(m.parameters())
+                conv_cnt += 1
+                if conv_cnt == 1:
+                    first_conv_weight.append(m_params[0])
+                    if len(m_params) == 2:
+                        first_conv_bias.append(m_params[1])
+                else:
+                    normal_weight.append(m_params[0])
+                    if len(m_params) == 2:
+                        normal_bias.append(m_params[1])
+            elif isinstance(m, torch.nn.Linear):    # support SimpleLinear
+                m_params = list(m.parameters())
+                normal_weight.append(m_params[0])
+                if len(m_params) == 2:
+                    normal_bias.append(m_params[1])
+            elif isinstance(m,
+                            (_BatchNorm, SyncBatchNorm, torch.nn.GroupNorm)):
+                for param in list(m.parameters()):
+                    if param.requires_grad:
+                        bn.append(param)
+
+            elif isinstance(m, LSC):
+                m_params = list(m.parameters())
+                lr5_weight.append(m_params[0])
+            elif isinstance(m, LSCLoss):
+                eta = list(m.parameters())[0]
+                if m.learnable_eta:
+                    lr5_weight.append(eta)
+
+            elif len(m._modules) == 0:
+                if len(list(m.parameters())) > 0:
+                    raise ValueError(f'New atomic module type: {type(m)}. '
+                                     'Need to give it a learning policy')
+
+        params.append({
+            'params': first_conv_weight,
+            'lr': self.base_lr,
+            'weight_decay': self.base_wd
+        })
+        params.append({
+            'params': first_conv_bias,
+            'lr': self.base_lr * 2,
+            'weight_decay': 0
+        })
+        params.append({
+            'params': normal_weight,
+            'lr': self.base_lr,
+            'weight_decay': self.base_wd
+        })
+        params.append({
+            'params': normal_bias,
+            'lr': self.base_lr * 2,
+            'weight_decay': 0
+        })
+        params.append({'params': bn, 'lr': self.base_lr, 'weight_decay': 0})
+        params.append({
+            'params': lr5_weight,
+            'lr': self.base_lr * fc_lr_scale_factor,
+            'weight_decay': self.base_wd
+        })
