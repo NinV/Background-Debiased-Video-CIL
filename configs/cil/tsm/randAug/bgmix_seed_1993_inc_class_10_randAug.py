@@ -61,7 +61,7 @@ model = dict(
         loss_cls=dict(type='LSCLoss'),
         spatial_type='avg',
         consensus=dict(type='AvgConsensus', dim=1),
-        dropout_ratio=0.5,
+        dropout_ratio=0.0,
         init_std=0.001,
         is_shift=True,
     ),
