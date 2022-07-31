@@ -14,27 +14,22 @@ accumulate_grad_batches = 2
 testing_videos_per_gpu = 1
 testing_workers_per_gpu = 2
 
-work_dir = 'work_dirs/bgmix_seed_1993_inc_class_5'
+work_dir = 'work_dirs/bgmix_seed_1000_inc_class_10'
 
 
 task_splits = [[68, 56, 78, 8, 23, 84, 90, 65, 74, 76, 40, 89, 3, 92, 55, 9, 26, 80, 43, 38, 58, 70, 77, 1, 85, 19, 17,
                 50, 28, 53, 13, 81, 45, 82, 6, 59, 83, 16, 15, 44, 91, 41, 72, 60, 79, 52, 20, 10, 31, 54, 37],
-               [95, 14, 71, 96, 99],
-               [98, 2, 64, 66, 42],
-               [22, 35, 86, 24, 34],
-               [87, 21, 100, 0, 88],
-               [27, 18, 94, 11, 12],
-               [47, 25, 30, 46, 62],
-               [69, 36, 61, 7, 63],
-               [75, 5, 32, 4, 51],
-               [48, 73, 93, 39, 67],
-               [29, 97, 49, 57, 33]]
+               [95, 14, 71, 96, 99, 98, 2, 64, 66, 42],
+               [22, 35, 86, 24, 34, 87, 21, 100, 0, 88],
+               [27, 18, 94, 11, 12, 47, 25, 30, 46, 62],
+               [69, 36, 61, 7, 63, 75, 5, 32, 4, 51],
+               [48, 73, 93, 39, 67, 29, 97, 49, 57, 33]]
 
 
 # select one of ['base', 'oracle', 'finetune']
 methods = 'base'
 starting_task = 0
-ending_task = 10
+ending_task = 5
 use_nme_classifier = False
 use_cbf = False
 cbf_train_backbone = False
@@ -81,8 +76,8 @@ kd_exemplar_only = False
 # cil optimizer and lr_scheduler
 optimizer = dict(
     type='SGD',
-    constructor='CILTSMOptimizerConstructor',
-    paramwise_cfg=dict(fc_lr5=True),
+    constructor='CILTSMOptimizerConstructorImprovised',
+    paramwise_cfg=dict(fc_lr_scale_factor=5.0),
     lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)
@@ -95,8 +90,8 @@ lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0
 cbf_num_epochs_per_task = 50
 cbf_optimizer = dict(
     type='SGD',
-    constructor='CILTSMOptimizerConstructor',
-    paramwise_cfg=dict(fc_lr5=True),
+    constructor='CILTSMOptimizerConstructorImprovised',
+    paramwise_cfg=dict(fc_lr_scale_factor=1.0),
     lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)
@@ -116,6 +111,7 @@ train_pipeline = [
     dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
+    dict(type='RandAugment', n=2, m=10),
     dict(
         type='MultiScaleCrop',
         input_size=224,

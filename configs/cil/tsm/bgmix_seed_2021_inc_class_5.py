@@ -34,6 +34,7 @@ task_splits = [[90, 2, 46, 4, 78, 8, 32, 22, 13, 60, 47, 80, 75, 74, 82, 56, 51,
 # select one of ['base', 'oracle', 'finetune']
 methods = 'base'
 starting_task = 0
+ending_task = 10
 use_nme_classifier = False
 use_cbf = False
 cbf_train_backbone = False
