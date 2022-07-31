@@ -61,7 +61,7 @@ model = dict(
         loss_cls=dict(type='LSCLoss'),
         spatial_type='avg',
         consensus=dict(type='AvgConsensus', dim=1),
-        dropout_ratio=0.0,
+        dropout_ratio=0.5,
         init_std=0.001,
         is_shift=True,
     ),
@@ -91,7 +91,7 @@ cbf_num_epochs_per_task = 50
 cbf_optimizer = dict(
     type='SGD',
     constructor='CILTSMOptimizerConstructorImprovised',
-    paramwise_cfg=dict(fc_lr_scale_factor=0.2),
+    paramwise_cfg=dict(fc_lr_scale_factor=1.0),
     lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)
