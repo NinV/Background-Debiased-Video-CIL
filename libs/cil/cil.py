@@ -565,6 +565,13 @@ class CILTrainer:
         if dump_config:
             self.config.dump(self.work_dir / 'config.py')
 
+        if isinstance(self.config.gpu_ids, list) and len(self.config.gpu_ids) > 1:
+            self.strategy = 'ddp_spawn'
+        elif isinstance(self.config.gpu_ids, int) and self.config.gpu_ids > 1:
+            self.strategy = 'ddp_spawn'
+        else:
+            self.strategy = None
+
     @property
     def current_task(self):
         return self._current_task
@@ -592,7 +599,7 @@ class CILTrainer:
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # callbacks=[lr_monitor]
                              enable_checkpointing=False,
-                             strategy='ddp_spawn'
+                             strategy=self.strategy
                              )
         trainer.fit(self.cil_model, self.data_module)
 
@@ -612,7 +619,7 @@ class CILTrainer:
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # limit_train_batches=10,
                              enable_checkpointing=False,
-                             strategy='ddp_spawn'
+                             strategy=self.strategy
                              )
         self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
@@ -884,7 +891,7 @@ class CILTrainer:
                              max_epochs=1,
                              logger=False,
                              enable_checkpointing=False,
-                             strategy='ddp_spawn',
+                             strategy=self.strategy,
                              callbacks=[predict_writer],
                              # limit_predict_batches=10
                              )
