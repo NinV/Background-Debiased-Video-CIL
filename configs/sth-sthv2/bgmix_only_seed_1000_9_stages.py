@@ -1,9 +1,9 @@
 # base settings
-gpu_ids = 2
+gpu_ids = 4
 
 # single gpu setting for traning
-videos_per_gpu = 48
-workers_per_gpu = 4
+videos_per_gpu = 16
+workers_per_gpu = 2
 accumulate_grad_batches = 1
 
 # single gpu setting for testing
@@ -54,7 +54,7 @@ model = dict(
     cls_head=dict(
         type='IncrementalTSMHead',
         num_classes=starting_num_classes,
-        in_channels=512,
+        in_channels=2048,
         inc_head_config=dict(type='LocalSimilarityClassifier',
                              out_features=starting_num_classes,
                              nb_proxies=1),
