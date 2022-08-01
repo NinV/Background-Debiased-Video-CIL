@@ -814,10 +814,16 @@ class CILTrainer:
                 cnn_accuracies.append(cnn_task_i_accuracies)
 
         print('CNN accuracies')
-        print(print_mean_accuracy(cnn_accuracies, [len(class_indices) for class_indices in self.task_splits[self.starting_task: self.ending_task+1]]))
+        cnn_pretty_table = print_mean_accuracy(cnn_accuracies, [len(class_indices) for class_indices in self.task_splits[self.starting_task: self.ending_task+1]])
+        print(cnn_pretty_table)
+        with open(self.work_dir / 'cnn_result.txt', 'w') as f:
+            f.write(cnn_pretty_table)
         if test_nme:
             print('NME accuracies')
-            print(print_mean_accuracy(nme_accuracies, [len(class_indices) for class_indices in self.task_splits[self.starting_task: self.ending_task+1]]))
+            nme_pretty_table = print_mean_accuracy(nme_accuracies, [len(class_indices) for class_indices in self.task_splits[self.starting_task: self.ending_task+1]])
+            print(nme_pretty_table)
+            with open(self.work_dir / 'nme_result.txt', 'w') as f:
+                f.write(nme_pretty_table)
 
         self._current_task = tmp  # reset state
 
