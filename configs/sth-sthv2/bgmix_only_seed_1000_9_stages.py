@@ -30,7 +30,7 @@ task_splits = [
 # select one of ['base', 'oracle', 'finetune']
 methods = 'base'
 starting_task = 0
-ending_task = 5
+ending_task = 9
 use_nme_classifier = False
 use_cbf = False
 cbf_train_backbone = False
@@ -46,7 +46,7 @@ model = dict(
     type='CILBGMixedRecognizer2D',
     backbone=dict(
         type='ResNetTSM',
-        pretrained='https://download.pytorch.org/models/resnet34-333f7ec4.pth',
+        pretrained='https://download.pytorch.org/models/resnet50-0676ba61.pth',
         depth=50,
         norm_eval=False,
         num_segments=8,
