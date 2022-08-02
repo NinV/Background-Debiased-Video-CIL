@@ -514,8 +514,8 @@ class CILTrainer:
         self.ckpt_dir = self.work_dir / 'ckpt'
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
 
+        self.data_module.generate_annotation_file()
         if self.starting_task == 0:
-            self.data_module.generate_annotation_file()
             self.data_module.reload_train_dataset(exemplar=None, use_internal_exemplar=False)
 
         # resume training
