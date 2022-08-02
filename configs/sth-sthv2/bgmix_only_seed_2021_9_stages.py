@@ -2,7 +2,7 @@
 gpu_ids = 4
 
 # single gpu setting for traning
-videos_per_gpu = 16
+videos_per_gpu = 12
 workers_per_gpu = 2
 accumulate_grad_batches = 1
 
