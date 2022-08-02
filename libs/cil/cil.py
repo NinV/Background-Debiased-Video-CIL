@@ -226,7 +226,7 @@ class CILDataModule(pl.LightningDataModule):
         self.config.data.features_extraction.ann_file = str(self.task_splits_ann_files['train'][task_idx])
         self.features_extraction_dataset = build_dataset(self.config.data.features_extraction)
         return DataLoader(self.features_extraction_dataset,
-                          batch_size=self.test_batch_size,
+                          batch_size=self.batch_size * 4,       # prediction takes less memory than training
                           num_workers=self.config.workers_per_gpu,
                           pin_memory=True,
                           shuffle=False,
@@ -595,7 +595,7 @@ class CILTrainer:
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.num_epochs_per_task,
-                             # limit_train_batches=10,
+                             # limit_train_batches=100,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # callbacks=[lr_monitor]
                              enable_checkpointing=False,
@@ -617,7 +617,7 @@ class CILTrainer:
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.cbf_num_epochs_per_task,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
-                             # limit_train_batches=10,
+                             # limit_train_batches=100,
                              enable_checkpointing=False,
                              strategy=self.strategy
                              )
@@ -897,7 +897,7 @@ class CILTrainer:
                              max_epochs=1,
                              logger=False,
                              enable_checkpointing=False,
-                             strategy=self.strategy,
+                             strategy=None,
                              callbacks=[predict_writer],
                              # limit_predict_batches=10
                              )
