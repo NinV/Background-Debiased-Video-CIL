@@ -34,7 +34,7 @@ ending_task = 9
 use_nme_classifier = False
 use_cbf = False
 cbf_train_backbone = False
-budget_size = 5
+budget_size = 20
 storing_methods = 'videos'
 budget_type = 'class'
 num_epochs_per_task = 50
@@ -77,8 +77,8 @@ kd_exemplar_only = False
 # cil optimizer and lr_scheduler
 optimizer = dict(
     type='SGD',
-    constructor='CILTSMOptimizerConstructor',
-    paramwise_cfg=dict(fc_lr5=True),
+    constructor='CILTSMOptimizerConstructorImprovised',
+    paramwise_cfg=dict(fc_lr_scale_factor=5.0),
     lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)
@@ -89,8 +89,8 @@ lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0
 cbf_num_epochs_per_task = 50
 cbf_optimizer = dict(
     type='SGD',
-    constructor='CILTSMOptimizerConstructor',
-    paramwise_cfg=dict(fc_lr5=True),
+    constructor='CILTSMOptimizerConstructorImprovised',
+    paramwise_cfg=dict(fc_lr_scale_factor=5.0),
     lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)
@@ -143,8 +143,8 @@ test_pipeline = [
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
     # dict(type='CenterCrop', crop_size=224),
-    # dict(type='ThreeCrop', crop_size=256),
-    dict(type='TenCrop', crop_size=256),
+    dict(type='ThreeCrop', crop_size=256),
+    # dict(type='TenCrop', crop_size=256),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
     dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
