@@ -1,5 +1,5 @@
 import pathlib
-import copy
+import random
 
 from tqdm import tqdm
 import numpy as np
@@ -24,6 +24,8 @@ class BackgroundMixDataset(RawframeDataset):
                  bg_mean=[123.675, 116.28, 103.53],
                  bg_std=[58.395, 57.12, 57.375],
                  alpha=0.5,
+                 prob=0.25,
+                 with_randAug=False,
                  data_prefix=None,
                  test_mode=False,
                  filename_tmpl='img_{:05}.jpg',
@@ -58,6 +60,8 @@ class BackgroundMixDataset(RawframeDataset):
                                     Normalize(bg_mean, bg_std)]
                                    )
         self.alpha = alpha
+        self.prob = prob
+        self.with_randAug = with_randAug
         self.bg_files = []
         if check_bg_dir:
             for idx, info in tqdm(enumerate(self.video_infos), total=len(self.video_infos),
@@ -73,23 +77,23 @@ class BackgroundMixDataset(RawframeDataset):
         """Prepare the frames for training given the index."""
         result = super().prepare_train_frames(idx)
 
+        # when randAug is in the pipeline, only apply BGMix when randAug is not applied
+        if self.with_randAug and result['randAug']:
+            return self._mix_background(result)
+
+        if random.random() < self.prob:
+            return self._mix_background(result)
+        result['bg_idx'] = -1
+        return result
+
+    def _mix_background(self, result):
         bg_idx = torch.randint(len(self.bg_files), (1,)).item()
         bg_img = read_image(self.bg_files[bg_idx]).float()
         bg_img = self.bg_pipeline(bg_img)
         bg_img = bg_img.view(1, bg_img.size(0), bg_img.size(1), bg_img.size(2))
         blend = result['imgs'] * (1 - self.alpha) + bg_img * self.alpha
-
-        # blend_ = blend.permute(0, 2, 3, 1).numpy().astype(np.uint8)
-        # bg_img = bg_img.permute(0, 2, 3, 1).numpy().astype(np.uint8)[0]
-        # frames = result['imgs'].permute(0, 2, 3, 1).numpy().astype(np.uint8)
-        #
-        # cv2.imshow('bg', cv2.cvtColor(bg_img, cv2.COLOR_RGB2BGR))
-        # for i in range(frames.shape[0]):
-        #     cv2.imshow('blend_{}'.format(i), cv2.cvtColor(blend_[i], cv2.COLOR_RGB2BGR))
-        #     cv2.imshow('frames_{}'.format(i), cv2.cvtColor(frames[i], cv2.COLOR_RGB2BGR))
-        #
-        # cv2.waitKey(0)
-        result['blended'] = blend
+        result['imgs'] = blend
+        result['bg_idx'] = bg_idx
         return result
 
 
