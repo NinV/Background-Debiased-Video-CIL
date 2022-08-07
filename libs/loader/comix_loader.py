@@ -1,4 +1,5 @@
 import pathlib
+import os.path as osp
 import random
 
 from tqdm import tqdm
@@ -17,7 +18,7 @@ class BackgroundMixDataset(RawframeDataset):
     def __init__(self,
                  ann_file,
                  pipeline,
-                 bg_dir,
+                 bg_dir: str,
                  check_bg_dir=True,
                  bg_image_extension='.jpg',
                  bg_size=(224, 224),
@@ -53,6 +54,14 @@ class BackgroundMixDataset(RawframeDataset):
                          dynamic_length, **kwargs)
 
         # extract background either from videos or from folders
+        """
+        https://github.com/open-mmlab/mmaction2/blob/40643bce66e78fbe525c1922329e82480f2aae0b/mmaction/datasets/base.py#L74
+        mmaction2 Base class convert data_prefix using realpath which will point to the source if data_prefix is a 
+        symlink. 
+        background directory should also be converted to realpath to make its behaviour consistent with the mmaction2 
+        data_prefix 
+        """
+        bg_dir = osp.realpath(bg_dir)
         self.bg_dir = pathlib.Path(bg_dir)
         self.bg_image_extension = bg_image_extension
         self.bg_dir.mkdir(exist_ok=True, parents=True)
