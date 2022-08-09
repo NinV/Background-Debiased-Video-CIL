@@ -235,16 +235,21 @@ class CILDataModule(pl.LightningDataModule):
                           )
 
     def features_extraction_dataloader_on_exemplar(self, task_idx: int):
-        raw_str_list = []
-        for i in range(task_idx + 1):
-            with open(self.exemplar_dir / 'exemplar_task_{}.txt'.format(i), 'r') as f:
-                raw_str_list.append(f.read().strip())
-
-        raw_str = '\n'.join(raw_str_list)
+        # raw_str_list = []
+        # for i in range(task_idx + 1):
+        #     with open(self.exemplar_dir / 'exemplar_task_{}.txt'.format(i), 'r') as f:
+        #         raw_str_list.append(f.read().strip())
+        #
+        # raw_str = '\n'.join(raw_str_list)
+        # tmp_exemplars_file = self.exemplar_dir / 'tmp_exemplars.txt'
+        # with open(tmp_exemplars_file, 'w') as f:
+        #     f.write(raw_str)
+        """
+        This method might be called multiple time in ddp_spawn. therefore, avoid write to file
+        Solution: call method self.combine_all_exemplar_ann_files to create an annotation file which is a combination
+        of all annotation files from all tasks so far
+        """
         tmp_exemplars_file = self.exemplar_dir / 'tmp_exemplars.txt'
-        with open(tmp_exemplars_file, 'w') as f:
-            f.write(raw_str)
-
         cfg = copy.deepcopy(self.config.data.features_extraction)
         cfg.ann_file = str(tmp_exemplars_file)
         dataset = build_dataset(cfg)
@@ -256,6 +261,17 @@ class CILDataModule(pl.LightningDataModule):
                           shuffle=False,
                           persistent_workers=True
                           )
+
+    def combine_all_exemplar_ann_files(self, task_idx: int):
+        raw_str_list = []
+        for i in range(task_idx + 1):
+            with open(self.exemplar_dir / 'exemplar_task_{}.txt'.format(i), 'r') as f:
+                raw_str_list.append(f.read().strip())
+
+        raw_str = '\n'.join(raw_str_list)
+        tmp_exemplars_file = self.exemplar_dir / 'tmp_exemplars.txt'
+        with open(tmp_exemplars_file, 'w') as f:
+            f.write(raw_str)
 
     def predict_dataloader(self):
         if self.predict_dataloader_mode == 'val':
@@ -874,6 +890,7 @@ class CILTrainer:
             self.cil_model.extract_repr = True
             self.cil_model.current_model.update_fc(self.num_classes())
 
+            self.data_module.combine_all_exemplar_ann_files(task_idx)   # prevent error from multiprocessing
             self.data_module.predict_dataloader_mode = 'feature_extraction_on_exemplar'
             self.data_module.predict_dataset_task_idx = task_idx
             pred_ = self.predict()
