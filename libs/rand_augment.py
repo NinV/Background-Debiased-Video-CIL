@@ -220,13 +220,21 @@ def augment_list():  # 16 oeprations and their ranges
 
 @PIPELINES.register_module()
 class RandAugment:
-    def __init__(self, n, m):
+    def __init__(self, n, m, prob=0.5):
         self.n = n
         self.m = m      # [0, 30]
         self.augment_list = augment_list()
-        print('[RandAug] initialize rand Aug')
+        self.prob = prob
+        print('[RandAug] initialize rand Aug (p = {})'.format(prob))
 
     def __call__(self, results):
+        if random.random() < self.prob:
+            return self._rand_aug(results)
+
+        results['randAug'] = False
+        return results
+
+    def _rand_aug(self, results):
         ops = random.choices(self.augment_list, k=self.n)
         # Sample once for each video clip
         flip_sign = random.random() > 0.5
@@ -253,5 +261,5 @@ class RandAugment:
                         results['human_mask'][i] = np.array(op(mask, val, flip_sign, fillcolor=0))
                 else:
                     results['imgs'][i] = np.array(op(img, val))
-
+        results['randAug'] = True
         return results

@@ -1,5 +1,6 @@
 from typing import Optional, Union, List, Tuple, Dict, Any
 import pathlib
+import os.path as osp
 import shutil
 import copy
 
@@ -286,7 +287,14 @@ class CILDataModule(pl.LightningDataModule):
         if task_idx == -1:  # automatically infer the current task index using internal state from controller
             task_idx = self.current_task
 
-        root_dir = pathlib.Path(self.config.data_root)
+        """
+        https://github.com/open-mmlab/mmaction2/blob/40643bce66e78fbe525c1922329e82480f2aae0b/mmaction/datasets/base.py#L74
+        mmaction2 Base class convert data_prefix using realpath which will point to the source if data_prefix is a 
+        symlink. 
+        background directory should also be converted to realpath to make its behaviour consistent with the mmaction2 
+        data_prefix 
+        """
+        root_dir = pathlib.Path(osp.realpath(self.config.data_root))
         ann_file = self.exemplar_dir / 'exemplar_task_{}.txt'.format(task_idx)
         with open(ann_file, 'w') as f:
             for classIdx, meta in exemplar_meta.items():
@@ -430,10 +438,7 @@ class BaseCIL(pl.LightningModule):
         previous_task_num_classes = self.num_classes(self.current_task - 1)
         # x.shape = (batch_size, channels, T, H, W)
         imgs, labels = batch_data['imgs'], batch_data['label']
-        if 'blended' in batch_data:
-            losses = self.current_model(imgs, labels, mixed_bg=batch_data['blended'])
-        else:
-            losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
+        losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
         if self.use_kd and self.current_task > 0:
             kd_loss = 0
             kd_criterion = nn.MSELoss()

@@ -1,5 +1,6 @@
 import pathlib
-import copy
+import os.path as osp
+import random
 
 from tqdm import tqdm
 import numpy as np
@@ -17,13 +18,15 @@ class BackgroundMixDataset(RawframeDataset):
     def __init__(self,
                  ann_file,
                  pipeline,
-                 bg_dir,
+                 bg_dir: str,
                  check_bg_dir=True,
                  bg_image_extension='.jpg',
                  bg_size=(224, 224),
                  bg_mean=[123.675, 116.28, 103.53],
                  bg_std=[58.395, 57.12, 57.375],
                  alpha=0.5,
+                 prob=0.25,
+                 with_randAug=False,
                  data_prefix=None,
                  test_mode=False,
                  filename_tmpl='img_{:05}.jpg',
@@ -51,6 +54,14 @@ class BackgroundMixDataset(RawframeDataset):
                          dynamic_length, **kwargs)
 
         # extract background either from videos or from folders
+        """
+        https://github.com/open-mmlab/mmaction2/blob/40643bce66e78fbe525c1922329e82480f2aae0b/mmaction/datasets/base.py#L74
+        mmaction2 Base class convert data_prefix using realpath which will point to the source if data_prefix is a 
+        symlink. 
+        background directory should also be converted to realpath to make its behaviour consistent with the mmaction2 
+        data_prefix 
+        """
+        bg_dir = osp.realpath(bg_dir)
         self.bg_dir = pathlib.Path(bg_dir)
         self.bg_image_extension = bg_image_extension
         self.bg_dir.mkdir(exist_ok=True, parents=True)
@@ -58,6 +69,8 @@ class BackgroundMixDataset(RawframeDataset):
                                     Normalize(bg_mean, bg_std)]
                                    )
         self.alpha = alpha
+        self.prob = prob
+        self.with_randAug = with_randAug
         self.bg_files = []
         if check_bg_dir:
             for idx, info in tqdm(enumerate(self.video_infos), total=len(self.video_infos),
@@ -73,23 +86,23 @@ class BackgroundMixDataset(RawframeDataset):
         """Prepare the frames for training given the index."""
         result = super().prepare_train_frames(idx)
 
+        # when randAug is in the pipeline, only apply BGMix when randAug is not applied
+        if self.with_randAug and result['randAug']:
+            return self._mix_background(result)
+
+        if random.random() < self.prob:
+            return self._mix_background(result)
+        result['bg_idx'] = -1
+        return result
+
+    def _mix_background(self, result):
         bg_idx = torch.randint(len(self.bg_files), (1,)).item()
         bg_img = read_image(self.bg_files[bg_idx]).float()
         bg_img = self.bg_pipeline(bg_img)
         bg_img = bg_img.view(1, bg_img.size(0), bg_img.size(1), bg_img.size(2))
         blend = result['imgs'] * (1 - self.alpha) + bg_img * self.alpha
-
-        # blend_ = blend.permute(0, 2, 3, 1).numpy().astype(np.uint8)
-        # bg_img = bg_img.permute(0, 2, 3, 1).numpy().astype(np.uint8)[0]
-        # frames = result['imgs'].permute(0, 2, 3, 1).numpy().astype(np.uint8)
-        #
-        # cv2.imshow('bg', cv2.cvtColor(bg_img, cv2.COLOR_RGB2BGR))
-        # for i in range(frames.shape[0]):
-        #     cv2.imshow('blend_{}'.format(i), cv2.cvtColor(blend_[i], cv2.COLOR_RGB2BGR))
-        #     cv2.imshow('frames_{}'.format(i), cv2.cvtColor(frames[i], cv2.COLOR_RGB2BGR))
-        #
-        # cv2.waitKey(0)
-        result['blended'] = blend
+        result['imgs'] = blend
+        result['bg_idx'] = bg_idx
         return result
 
 
