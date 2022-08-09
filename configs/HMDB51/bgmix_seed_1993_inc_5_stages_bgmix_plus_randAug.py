@@ -1,29 +1,27 @@
+import os
+data_dir = os.environ['VIDEO_CIL_ROOT']
+
 # base settings
-gpu_ids = 1
+gpu_ids = 2
 
 # 8 gpus setting
 # videos_per_gpu = 12   # 8 gpus x 12 videos (single gpu setting)
 # workers_per_gpu = 2   # 8 gpu setting
 
 # single gpu setting for traning
-videos_per_gpu = 48
+videos_per_gpu = 24
 workers_per_gpu = 4
-accumulate_grad_batches = 2
+accumulate_grad_batches = 1
 
 # single gpu setting for testing
 testing_videos_per_gpu = 1
 testing_workers_per_gpu = 2
 
-work_dir = 'work_dirs/bgmix_seed_1000_inc_5_stages_randAug_only'
+work_dir = 'work_dirs/bgmix_seed_1993_inc_5_stages_bgmix_plus_randAug'
 
 
-task_splits = [[37, 97, 56, 55, 33, 84, 3, 4, 72, 59, 66, 48, 65, 91, 99, 39, 34, 22, 67, 74, 19, 35, 9, 86, 88, 63,
-                85, 38, 54, 25, 57, 62, 83, 76, 6, 13, 2, 53, 8, 24, 44, 12, 100, 29, 5, 17, 15, 73, 47, 27, 46],
-               [98, 96, 18, 90, 75, 31, 95, 49, 43, 78],
-               [23, 68, 16, 7, 26, 21, 50, 70, 32, 52],
-               [11, 69, 93, 14, 79, 10, 80, 77, 81, 28],
-               [82, 30, 20, 41, 58, 42, 60, 36, 40, 45],
-               [89, 0, 61, 1, 92, 94, 64, 71, 87, 51]]
+task_splits = [[43, 41, 23, 14, 13, 40, 42, 22, 16, 45, 17, 10, 27, 46, 35, 8, 2, 34, 1, 37, 21, 0, 18, 36, 38, 24],
+             [12, 6, 15, 20, 25], [48, 30, 19, 44, 26], [7, 28, 11, 5, 32], [4, 9, 47, 39, 31], [3, 29, 50, 49, 33]]
 
 
 # select one of ['base', 'oracle', 'finetune']
@@ -38,22 +36,34 @@ storing_methods = 'videos'
 budget_type = 'class'
 num_epochs_per_task = 50
 
+"""
+mode: bgmix_plus_randAug 
+    bgmix_prob = 1 - randAug_prob
+
+mode: randAug only
+    randAug_prob = 2    # set any value >= 1.0
+
+mode: bgmix only
+    randAug_prob = -1   # set any value < 0.0
+"""
+randAug_prob = 0.75     # bgmix_prob = 0.25
+
 # mmaction2 model config
 # model settings
 starting_num_classes = len(task_splits[0])
 model = dict(
-    type='CILBGMixedRecognizer2D',
+    type='CILRecognizer2D',
     backbone=dict(
         type='ResNetTSM',
-        pretrained='https://download.pytorch.org/models/resnet34-333f7ec4.pth',
-        depth=34,
+        pretrained='https://download.pytorch.org/models/resnet50-0676ba61.pth',
+        depth=50,
         norm_eval=False,
         num_segments=8,
         shift_div=8),
     cls_head=dict(
         type='IncrementalTSMHead',
         num_classes=starting_num_classes,
-        in_channels=512,
+        in_channels=2048,
         inc_head_config=dict(type='LocalSimilarityClassifier',
                              out_features=starting_num_classes,
                              nb_proxies=1),
@@ -66,7 +76,6 @@ model = dict(
         is_shift=True,
     ),
     # model training and testing settings
-    prob=-1,      # probability for using background mixing
     train_cfg=None,
     test_cfg=dict(average_clips='prob'))
 
@@ -98,10 +107,10 @@ cbf_optimizer = dict(
 cbf_lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0.1))
 
 # dataset settings
-data_root = '/local_datasets/ucf101-full/rawframes'
+data_root = os.path.join(data_dir, 'rawframes')
 test_split = 1
-train_ann_file = '/local_datasets/ucf101-full/ucf101_train_split_{}_rawframes.txt'.format(test_split)
-val_ann_file = '/local_datasets/ucf101-full/ucf101_val_split_{}_rawframes.txt'.format(test_split)
+train_ann_file = os.path.join(data_dir, 'ucf101_train_split_{}_rawframes.txt'.format(test_split))
+val_ann_file = os.path.join(data_dir, 'ucf101_val_split_{}_rawframes.txt'.format(test_split))
 cil_ann_file_template = '{}_task_{}.txt'        # requre exact 2 placeholders
 
 img_norm_cfg = dict(
@@ -111,7 +120,7 @@ train_pipeline = [
     dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    dict(type='RandAugment', n=2, m=10),
+    dict(type='RandAugment', n=2, m=10, prob=randAug_prob),
     dict(
         type='MultiScaleCrop',
         input_size=224,
@@ -122,7 +131,7 @@ train_pipeline = [
     dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
-    dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
+    dict(type='Collect', keys=['imgs', 'label', 'randAug'], meta_keys=[]),
     dict(type='ToTensor', keys=['imgs', 'label'])
 ]
 val_pipeline = [
@@ -170,7 +179,7 @@ features_extraction_pipeline = [
 ]
 
 dataset_type = 'BackgroundMixDataset'
-background_dir = '/local_datasets/ucf101-full/bg_extract'
+background_dir = os.path.join(data_dir, 'bg_extract')
 data = dict(
     train=dict(
         type=dataset_type,
@@ -178,7 +187,8 @@ data = dict(
         bg_dir=background_dir,
         data_prefix=data_root,
         pipeline=train_pipeline,
-        alpha=0.5
+        alpha=0.5,
+        with_randAug=True,
     ),
     val=dict(
         type=dataset_type,

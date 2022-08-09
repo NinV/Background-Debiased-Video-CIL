@@ -193,7 +193,7 @@ data = dict(
         data_prefix=data_root,
         pipeline=train_pipeline,
         alpha=0.5,
-        with_randAug=False,
+        with_randAug=True,
     ),
     val=dict(
         type=dataset_type,

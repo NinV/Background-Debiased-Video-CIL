@@ -187,7 +187,8 @@ data = dict(
         bg_dir=background_dir,
         data_prefix=data_root,
         pipeline=train_pipeline,
-        alpha=0.5
+        alpha=0.5,
+        with_randAug=True
     ),
     val=dict(
         type=dataset_type,

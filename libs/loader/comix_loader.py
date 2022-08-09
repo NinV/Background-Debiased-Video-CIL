@@ -85,14 +85,21 @@ class BackgroundMixDataset(RawframeDataset):
     def prepare_train_frames(self, idx):
         """Prepare the frames for training given the index."""
         result = super().prepare_train_frames(idx)
+        result['bg_idx'] = -1
 
         # when randAug is in the pipeline, only apply BGMix when randAug is not applied
-        if self.with_randAug and result['randAug']:
-            return self._mix_background(result)
+        if self.with_randAug:
+            if not result['randAug']:
+                result = self._mix_background(result)
 
-        if random.random() < self.prob:
-            return self._mix_background(result)
-        result['bg_idx'] = -1
+        elif random.random() < self.prob:
+            result = self._mix_background(result)
+
+        # sanity check
+        if result['randAug']:
+            assert result['bg_idx'] == -1
+        else:
+            assert result['bg_idx'] != -1
         return result
 
     def _mix_background(self, result):
