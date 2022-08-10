@@ -17,7 +17,7 @@ accumulate_grad_batches = 1
 testing_videos_per_gpu = 1
 testing_workers_per_gpu = 2
 
-work_dir = 'work_dirs/bgmix_seed_1000_inc_5_stages_bgmix_plus_randAug'
+work_dir = 'work_dirs/hmdb51_seed_2021_inc_5_stages_bgmix_plus_randAug'
 
 
 task_splits = [[15, 19, 13, 34, 11, 32, 49, 8, 39, 41, 4, 40, 31, 48, 25, 23, 9, 42, 35, 14, 10, 37, 28, 5, 20, 46],
