@@ -584,7 +584,7 @@ class CILTrainer:
         self.data_module.build_validation_datasets()
 
         if dump_config:
-            self.config.dump(self.work_dir / 'config.py')
+            self.config.dump(str(self.work_dir / 'config.py'))
 
         if isinstance(self.config.gpu_ids, list) and len(self.config.gpu_ids) > 1:
             self.strategy = 'ddp_spawn'
