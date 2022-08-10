@@ -110,8 +110,8 @@ cbf_lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gam
 # dataset settings
 data_root = os.path.join(data_dir, 'rawframes')
 test_split = 1
-train_ann_file = os.path.join(data_dir, 'ucf101_train_split_{}_rawframes.txt'.format(test_split))
-val_ann_file = os.path.join(data_dir, 'ucf101_val_split_{}_rawframes.txt'.format(test_split))
+train_ann_file = os.path.join(data_dir, 'hmdb51_train_split_{}_rawframes.txt'.format(test_split))
+val_ann_file = os.path.join(data_dir, 'hmdb51_val_split_{}_rawframes.txt'.format(test_split))
 cil_ann_file_template = '{}_task_{}.txt'        # requre exact 2 placeholders
 
 img_norm_cfg = dict(
