@@ -21,7 +21,8 @@ class BackgroundMixDataset(RawframeDataset):
                  bg_dir: str,
                  check_bg_dir=True,
                  bg_image_extension='.jpg',
-                 bg_size=(224, 224),
+                 bg_resize=256,
+                 bg_crop_size=(224, 224),
                  bg_mean=[123.675, 116.28, 103.53],
                  bg_std=[58.395, 57.12, 57.375],
                  alpha=0.5,
@@ -65,7 +66,8 @@ class BackgroundMixDataset(RawframeDataset):
         self.bg_dir = pathlib.Path(bg_dir)
         self.bg_image_extension = bg_image_extension
         self.bg_dir.mkdir(exist_ok=True, parents=True)
-        self.bg_pipeline = Compose([RandomCrop(bg_size),
+        self.bg_pipeline = Compose([Resize(bg_resize),        # fit smaller edge
+                                    RandomCrop(bg_crop_size),
                                     Normalize(bg_mean, bg_std)]
                                    )
         self.alpha = alpha
