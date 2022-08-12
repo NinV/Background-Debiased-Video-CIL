@@ -1,3 +1,6 @@
+import os
+data_dir = os.environ['VIDEO_CIL_ROOT']
+
 # base settings
 gpu_ids = 4
 
@@ -110,9 +113,9 @@ cbf_optimizer = dict(
 cbf_lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0.1))
 
 # dataset settings
-data_root = '/local_datasets/something-somethingv2/rawframes/'
-train_ann_file = '/local_datasets/something-somethingv2/sthv2_train_list_rawframes.txt'
-val_ann_file = '/local_datasets/something-somethingv2/sthv2_val_list_rawframes.txt'
+data_root = os.path.join(data_dir, 'rawframes')
+train_ann_file = os.path.join(data_dir, 'sthv2_train_list_rawframes.txt')
+val_ann_file = os.path.join(data_dir, 'sthv2_val_list_rawframes.txt')
 cil_ann_file_template = '{}_task_{}.txt'  # requre exact 2 placeholders
 
 img_norm_cfg = dict(
@@ -181,7 +184,7 @@ features_extraction_pipeline = [
 ]
 
 dataset_type = 'BackgroundMixDataset'
-background_dir = '/local_datasets/something-somethingv2/bg_extract'
+background_dir = os.path.join(data_dir, 'bg_extract')
 data = dict(
     train=dict(
         type=dataset_type,
