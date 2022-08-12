@@ -462,16 +462,17 @@ class BaseCIL(pl.LightningModule):
             with torch.no_grad():
                 self.prev_model.forward_test(imgs)
 
-            for m_name in self.kd_modules_names:
+            scale_factor = self.config.adaptive_scale_factors[self.current_task]
+            for m_name, kd_weight in zip(self.kd_modules_names, self.config.kd_weight_by_module):
                 current_model_features = self.current_model_kd_hooks.get_layer_output(m_name)
                 prev_model_features = self.prev_model_kd_hooks.get_layer_output(m_name).detach()
 
                 if self.config.kd_exemplar_only:
                     indices = (batch_data['label'].view(-1) < previous_task_num_classes).nonzero().squeeze()
                     if indices.nelement():
-                        kd_loss += kd_criterion(current_model_features[indices], prev_model_features[indices])
+                        kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features[indices], prev_model_features[indices])
                 else:
-                    kd_loss += kd_criterion(current_model_features, prev_model_features)
+                    kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features, prev_model_features)
             losses['kd_loss'] = kd_loss
         else:
             losses['kd_loss'] = 0.
