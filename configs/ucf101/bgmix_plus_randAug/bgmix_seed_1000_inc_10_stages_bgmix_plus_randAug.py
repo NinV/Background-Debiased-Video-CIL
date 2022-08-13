@@ -85,6 +85,8 @@ model = dict(
 kd_modules_names = ['backbone.layer1', 'backbone.layer2', 'backbone.layer3', 'backbone.layer4', 'cls_head.avg_pool']
 repr_hook = 'cls_head.avg_pool'     # extract representation
 kd_exemplar_only = False
+kd_weight_by_module = [1.0, 1.0, 1.0, 1.0, 0.01]
+adaptive_scale_factors = [1.0, 3.3466401061363023, 3.492849839314596, 3.63318042491699, 3.7682887362833544, 3.8987177379235853, 4.024922359499621, 4.147288270665544, 4.266145801540309, 4.381780460041329, 4.494441010848846]
 # cil optimizer and lr_scheduler
 optimizer = dict(
     type='SGD',
