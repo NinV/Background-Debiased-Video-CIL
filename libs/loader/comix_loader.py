@@ -98,10 +98,11 @@ class BackgroundMixDataset(RawframeDataset):
             result = self._mix_background(result)
 
         # sanity check
-        if result['randAug']:
-            assert result['bg_idx'] == -1
-        else:
-            assert result['bg_idx'] != -1
+        if self.with_randAug:
+            if result['randAug']:
+                assert result['bg_idx'] == -1
+            else:
+                assert result['bg_idx'] != -1
         return result
 
     def _mix_background(self, result):
