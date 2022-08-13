@@ -227,7 +227,7 @@ class CILDataModule(pl.LightningDataModule):
         self.config.data.features_extraction.ann_file = str(self.task_splits_ann_files['train'][task_idx])
         self.features_extraction_dataset = build_dataset(self.config.data.features_extraction)
         return DataLoader(self.features_extraction_dataset,
-                          batch_size=self.batch_size * 4,       # prediction takes less memory than training
+                          batch_size=self.batch_size,       # prediction takes less memory than training
                           num_workers=self.config.workers_per_gpu,
                           pin_memory=True,
                           shuffle=False,
