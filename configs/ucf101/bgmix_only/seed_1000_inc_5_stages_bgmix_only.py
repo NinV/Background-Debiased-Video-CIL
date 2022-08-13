@@ -40,17 +40,6 @@ budget_size = 5
 storing_methods = 'videos'
 budget_type = 'class'
 num_epochs_per_task = 50
-
-"""
-mode: bgmix_plus_randAug 
-    bgmix_prob = 1 - randAug_prob
-
-mode: randAug only
-    randAug_prob = 2    # set any value >= 1.0
-
-mode: bgmix only
-    randAug_prob = -1   # set any value < 0.0
-"""
 randAug_prob = -1
 
 # mmaction2 model config
@@ -195,7 +184,8 @@ data = dict(
         data_prefix=data_root,
         pipeline=train_pipeline,
         alpha=0.5,
-        with_randAug=True,
+        with_randAug=False,
+        prob=0.25,
     ),
     val=dict(
         type=dataset_type,
