@@ -13,7 +13,7 @@ accumulate_grad_batches = 1
 testing_videos_per_gpu = 1
 testing_workers_per_gpu = 2
 
-work_dir = 'work_dirs/sth-sthv2-seed_1993'
+work_dir = 'work_dirs/sth-sthv2-seed_1993_inc_9_stages'
 
 task_splits = [
     [156, 9, 119, 163, 54, 168, 157, 155, 27, 6, 51, 59, 42, 173, 113, 35, 118, 147, 159, 4, 2, 10, 112, 101, 134, 26,
