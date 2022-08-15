@@ -621,6 +621,7 @@ class CILTrainer:
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # callbacks=[lr_monitor]
                              enable_checkpointing=False,
+                             gradient_clip_val=1.0,
                              strategy=self.strategy
                              )
         trainer.fit(self.cil_model, self.data_module)
@@ -640,6 +641,7 @@ class CILTrainer:
                              max_epochs=self.config.cbf_num_epochs_per_task,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # limit_train_batches=100,
+                             gradient_clip_val=1.0,
                              enable_checkpointing=False,
                              strategy=self.strategy
                              )
