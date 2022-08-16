@@ -679,7 +679,7 @@ class CILTrainer:
             if self._current_task > 0 and self.config.use_cbf:
                 self.train_cbf()
 
-            exemplar_class_means = self._get_exemplar_class_means(self.current_task)
+            exemplar_class_means = self._get_exemplar_class_means(self.current_task, override_class_mean_ckpt=True)
 
             # testing
             self._testing(val_test='val', exemplar_class_means=exemplar_class_means)
@@ -829,7 +829,7 @@ class CILTrainer:
                 torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task))
             )
             if test_nme:
-                exemplar_class_means = self._get_exemplar_class_means(task_idx)
+                exemplar_class_means = self._get_exemplar_class_means(task_idx, override_class_mean_ckpt=False)
                 cnn_task_i_accuracies, nme_task_i_accuracies = self._testing(exemplar_class_means=exemplar_class_means)
                 cnn_accuracies.append(cnn_task_i_accuracies)
                 nme_accuracies.append(nme_task_i_accuracies)
@@ -880,10 +880,10 @@ class CILTrainer:
         self._current_task = self.ending_task
         self._testing(val_test='test', exemplar_class_means=exemplar_class_means)
 
-    def _get_exemplar_class_means(self, task_idx: int):
+    def _get_exemplar_class_means(self, task_idx: int, override_class_mean_ckpt=False):
         # load class mean from file
         exemplar_class_mean_file = self.ckpt_dir / 'exemplar_class_mean_task_{}.pt'.format(task_idx)
-        if exemplar_class_mean_file.exists():
+        if not override_class_mean_ckpt and exemplar_class_mean_file.exists():
             print('Load class means (exemplar) from:', exemplar_class_mean_file)
             class_means = torch.load(exemplar_class_mean_file)['class_means']
 
