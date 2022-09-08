@@ -1,10 +1,32 @@
+from typing import List
 import numpy as np
 import torch.optim.optimizer
 from mmcv.utils.config import Config as mmcvConfig
 from tabulate import tabulate
 
 
-def print_mean_accuracy(accuracies, num_classes_per_task, floatfmt=".2f"):
+class AverageMeter:
+    """Computes and stores the average and current value"""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.values = []
+        self.sizes = []
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.values.append(val)
+        self.sizes.append(n)
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+
+def print_mean_accuracy(accuracies: List[AverageMeter], num_classes_per_task, floatfmt=".2f"):
     assert len(accuracies) == len(num_classes_per_task)
     num_tasks = len(num_classes_per_task)
 
@@ -17,12 +39,9 @@ def print_mean_accuracy(accuracies, num_classes_per_task, floatfmt=".2f"):
     table = []
     avg_acc = []
     for task_i in range(num_tasks):
-        avg_acc_task_i = (np.array(num_classes_per_task[:task_i + 1]) * accuracies[task_i]).sum()
-        avg_acc_task_i /= np.sum(num_classes_per_task[:task_i + 1])
         num_placeholders = num_tasks - task_i - 1
-        # table.append(['task {}'.format(task_i), *accuracies[task_i], ] + num_placeholders * ['-'] + [avg_acc_task_i])
-        table.append(['task {}'.format(task_i), *accuracies[task_i], ] + num_placeholders * [None] + [avg_acc_task_i])
-        avg_acc.append(avg_acc_task_i)
+        table.append(['task {}'.format(task_i), *accuracies[task_i].values] + num_placeholders * [None] + [avg_acc_task_i])
+        avg_acc.append(accuracies[task_i].avg)
 
     avg_acc = np.mean(avg_acc)
     table.append(['avg_acc'] + num_tasks * [None] + [avg_acc])
