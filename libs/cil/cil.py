@@ -4,6 +4,7 @@ import os.path as osp
 import shutil
 import copy
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -18,7 +19,7 @@ from mmaction.models import build_model
 
 from ..module_hooks import OutputHook
 from .memory_selection import Herding
-from ..utils import print_mean_accuracy, build_lr_scheduler
+from ..utils import print_mean_accuracy, build_lr_scheduler, AverageMeter
 from ..loader.comix_loader import BackgroundMixDataset
 
 
@@ -32,11 +33,11 @@ class CILDataModule(pl.LightningDataModule):
         self.task_splits = config.task_splits
         self.work_dir = pathlib.Path(config.work_dir)
 
-        self.num_classes_per_task = []
-        accumulate_num_tasks = 0
+        self.accumulate_task_size_list = []
+        accumulate_task_size = 0
         for i in self.task_splits:
-            accumulate_num_tasks += len(i)
-            self.num_classes_per_task.append(accumulate_num_tasks)
+            accumulate_task_size += len(i)
+            self.accumulate_task_size_list.append(accumulate_task_size)
 
         self.ori_idx_to_inc_idx = {}
         for task_i in self.task_splits:
@@ -202,8 +203,38 @@ class CILDataModule(pl.LightningDataModule):
                           )
 
     # avoid override val_dataloader abstract method
-    def get_val_dataloader(self, task_idx: int):
-        return DataLoader(self.val_datasets[task_idx],
+    def get_test_dataset(self, task_indices: Union[int, List, Tuple], val_test: str):
+        assert val_test in ['val', 'test']
+
+        if val_test == 'val':
+            dataset_list = self.val_datasets
+        else:
+            dataset_list = self.test_datasets
+
+        if isinstance(task_indices, int):
+            return dataset_list[task_indices]
+
+        assert len(task_indices) == 2
+        starting_task, ending_task = task_indices  # ending task is inclusive
+        dataset_list = dataset_list[starting_task: ending_task + 1]
+
+        if val_test == 'val':
+            cfg = copy.deepcopy(self.config.data.val)
+        else:
+            cfg = copy.deepcopy(self.config.data.test)
+
+        cfg.ann_file = str(self.task_splits_ann_files['val'][starting_task])  # TODO: Need an empty ds constructor
+        dataset = build_dataset(cfg)
+        dataset.test_mode = True
+        if len(dataset_list) > 1:
+            for ds_ in dataset_list[1:]:
+                dataset = self.merge_dataset(dataset, ds_)
+
+        return dataset
+
+    def get_val_dataloader(self, task_indices: Union[int, List, Tuple]):
+        val_dataset = self.get_test_dataset(task_indices, 'val')
+        return DataLoader(val_dataset,
                           batch_size=self.test_batch_size,
                           num_workers=self.config.testing_workers_per_gpu,
                           pin_memory=True,
@@ -211,15 +242,16 @@ class CILDataModule(pl.LightningDataModule):
                           persistent_workers=True
                           )
 
-    def get_test_dataloader(self, task_idx: int):
-        return DataLoader(self.test_datasets[task_idx],
+    def get_test_dataloader(self, task_indices: Union[int, List, Tuple]):
+        test_dataset = self.get_test_dataset(task_indices, 'test')
+        return DataLoader(test_dataset,
                           batch_size=self.test_batch_size,
                           num_workers=self.config.testing_workers_per_gpu,
                           pin_memory=True,
                           shuffle=False,
                           persistent_workers=True
                           )
-    
+
     def features_extraction_dataloader_on_train_dataset(self, task_idx: int):
         """
         extracting features for memory selection
@@ -227,7 +259,7 @@ class CILDataModule(pl.LightningDataModule):
         self.config.data.features_extraction.ann_file = str(self.task_splits_ann_files['train'][task_idx])
         self.features_extraction_dataset = build_dataset(self.config.data.features_extraction)
         return DataLoader(self.features_extraction_dataset,
-                          batch_size=self.batch_size,       # prediction takes less memory than training
+                          batch_size=self.batch_size,  # prediction takes less memory than training
                           num_workers=self.config.workers_per_gpu,
                           pin_memory=True,
                           shuffle=False,
@@ -275,7 +307,7 @@ class CILDataModule(pl.LightningDataModule):
 
     def predict_dataloader(self):
         if self.predict_dataloader_mode == 'val':
-            print('[predict_dataloader] mode: {}, task: {}'.format(self.predict_dataloader_mode, 
+            print('[predict_dataloader] mode: {}, task: {}'.format(self.predict_dataloader_mode,
                                                                    self.predict_dataset_task_idx))
             loader = self.get_val_dataloader(self.predict_dataset_task_idx)
 
@@ -399,7 +431,7 @@ class BaseCIL(pl.LightningModule):
         self._repr_hook = self.register_modules_hooks(self.current_model, [self._repr_module_name])
 
         # optimizers
-        self.optimizer_mode = 'default'         # ['default', 'cbf']
+        self.optimizer_mode = 'default'  # ['default', 'cbf']
 
         self.extract_meta = False
 
@@ -420,9 +452,9 @@ class BaseCIL(pl.LightningModule):
         optimizer = build_optimizer(self.current_model, optimizer_config)
         if lr_scheduler_config:
             return {
-                    'optimizer': optimizer,
-                    'lr_scheduler': build_lr_scheduler(optimizer, lr_scheduler_config),
-                    }
+                'optimizer': optimizer,
+                'lr_scheduler': build_lr_scheduler(optimizer, lr_scheduler_config),
+            }
         return optimizer
 
     @staticmethod
@@ -435,7 +467,7 @@ class BaseCIL(pl.LightningModule):
     def current_task(self):
         return self.controller.current_task
 
-    def num_classes(self, task_idx=-1):
+    def num_classes(self, task_idx):
         return self.controller.num_classes(task_idx)
 
     # others
@@ -470,7 +502,8 @@ class BaseCIL(pl.LightningModule):
                 if self.config.kd_exemplar_only:
                     indices = (batch_data['label'].view(-1) < previous_task_num_classes).nonzero().squeeze()
                     if indices.nelement():
-                        kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features[indices], prev_model_features[indices])
+                        kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features[indices],
+                                                                           prev_model_features[indices])
                 else:
                     kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features, prev_model_features)
             losses['kd_loss'] = kd_loss
@@ -480,7 +513,7 @@ class BaseCIL(pl.LightningModule):
         batch_size = imgs.shape[0]
         for loss_name, loss_value in losses.items():
             self.log('train_' + loss_name, losses[loss_name], on_step=True, on_epoch=True, prog_bar=True, logger=True,
-                 batch_size=batch_size)
+                     batch_size=batch_size)
 
         loss = losses['kd_loss'] + losses['loss_cls']
         if 'loss_bg_mixed' in losses:
@@ -525,7 +558,7 @@ class CILTrainer:
         self.num_epoch_per_task = config.num_epochs_per_task
         self.task_splits = config.task_splits
         self.num_tasks = min(len(config.task_splits), config.ending_task + 1)
-        self.ending_task = config.ending_task       # TODO: fix this later
+        self.ending_task = config.ending_task  # TODO: fix this later
         self.max_epochs = self.num_tasks * self.num_epoch_per_task
 
         self.data_module = CILDataModule(config)
@@ -563,17 +596,17 @@ class CILTrainer:
 
             # roll back to previous task_idx to load weights
             self._current_task -= 1
-            self.cil_model.current_model.update_fc(self.num_classes())
+            self.cil_model.current_model.update_fc(self.num_classes(self._current_task))
             self.cil_model.current_model.load_state_dict(
                 torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)))
-            self.cil_model.prev_model.update_fc(self.num_classes())
+            self.cil_model.prev_model.update_fc(self.num_classes(self._current_task))
             self.cil_model.prev_model.load_state_dict(self.cil_model.current_model.state_dict())
             self.cil_model.prev_model.eval()
 
             # back to starting task update the classifier
             self._current_task += 1
-            self.cil_model.current_model.update_fc(self.num_classes())
-            self.cil_model.prev_model.update_fc(self.num_classes())
+            self.cil_model.current_model.update_fc(self.num_classes(self._current_task))
+            self.cil_model.prev_model.update_fc(self.num_classes(self._current_task))
 
             if self.config.keep_all_backgrounds:
                 for i in range(self._current_task):
@@ -606,11 +639,8 @@ class CILTrainer:
     def val_dataset(self):
         return self.data_module.val_datasets[self._current_task]
 
-    def num_classes(self, task_idx=-1):
-        if task_idx == -1:
-            return self.data_module.num_classes_per_task[self.current_task]
-        else:
-            return self.data_module.num_classes_per_task[task_idx]
+    def num_classes(self, task_idx: int):
+        return self.data_module.accumulate_task_size_list[task_idx]
 
     def train_task(self):
         # lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -681,13 +711,14 @@ class CILTrainer:
 
             exemplar_class_means = self._get_exemplar_class_means(self.current_task, override_class_mean_ckpt=True)
 
-            # testing
-            self._testing(val_test='val', exemplar_class_means=exemplar_class_means)
-
             # saving model weights
             save_weight_destination = self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)
             torch.save(self.cil_model.current_model.state_dict(), save_weight_destination)
             print('save_model at:', str(save_weight_destination))
+
+            # testing
+            self._testing(val_test='val', exemplar_class_means=exemplar_class_means,
+                          task_indices=[0, self._current_task])
 
             # update model and prepare dataset for next task
             self._current_task += 1
@@ -695,13 +726,13 @@ class CILTrainer:
             if self._current_task < self.num_tasks:  # sanity check
                 self.cil_model.prev_model.load_state_dict(self.cil_model.current_model.state_dict())
                 self.cil_model.prev_model.eval()
-                self.cil_model.current_model.update_fc(self.num_classes())
+                self.cil_model.current_model.update_fc(self.num_classes(self._current_task))
 
                 # update the fc layer of prev model here will simplify the training loops (load state dict)
                 # In theory, prev model does not need a classifier, but the mmaction2 required a Classifier
                 # for Recognizer2D class
                 # this does not affect KD loss because the classifier does not contribute to KD loss
-                self.cil_model.prev_model.update_fc(self.num_classes())
+                self.cil_model.prev_model.update_fc(self.num_classes(self._current_task))
 
                 # 3. prepare data for next task and update model
                 self.data_module.reload_train_dataset(use_internal_exemplar=True)
@@ -710,7 +741,7 @@ class CILTrainer:
     def print_task_info(self):
         print('Task {}, current heads: {}\n'
               'Training set size: {} (including {} samples from exemplar)'.format(self._current_task,
-                                                                                  self.num_classes(),
+                                                                                  self.num_classes(self._current_task),
                                                                                   len(self.data_module.train_dataset),
                                                                                   self.data_module.exemplar_size,
                                                                                   ))
@@ -762,55 +793,70 @@ class CILTrainer:
         }
         return collated_prediction_with_meta
 
-    def _testing(self, val_test='test', exemplar_class_means=None):
+    def _testing(self, task_indices: Union[List[int], Tuple[int]], val_test='test', exemplar_class_means=None):
+        assert len(task_indices) == 2
         print('Begin testing')
         if exemplar_class_means is not None:
             self.cil_model.extract_repr = True
-        metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes(), multiclass=True)
 
-        cnn_accuracies = []
-        nme_accuracies = []
+        metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes(task_indices[-1]), multiclass=True)
+        self.data_module.predict_dataloader_mode = val_test
+        self.data_module.predict_dataset_task_idx = task_indices
+        pred_ = self.predict()
+
+        # collate data
+        cls_score = []
+        labels = []
+        for batch_data in pred_:
+            cls_score.extend(batch_data['cls_score'])
+            labels.extend(batch_data['label'])
+        cls_score = torch.stack(cls_score, dim=0)
+        labels = torch.stack(labels, dim=0)
+        preds = torch.argmax(cls_score, dim=1, keepdim=False)
+
+        cnn_accuracies = AverageMeter()
+        nme_accuracies = AverageMeter()
+        if val_test == 'val':
+            ds_list = self.data_module.val_datasets
+        else:
+            ds_list = self.data_module.val_datasets
+
+        start = 0
         for task_idx in range(self.current_task + 1):
-            self.data_module.predict_dataloader_mode = val_test
-            self.data_module.predict_dataset_task_idx = task_idx
-
-            pred_ = self.predict()
-            # collate data
-            cls_score = []
-            labels = []
-            for batch_data in pred_:
-                cls_score.extend(batch_data['cls_score'])
-                labels.extend(batch_data['label'])
-            cls_score = torch.stack(cls_score, dim=0)
-            labels = torch.stack(labels, dim=0)
-
-            preds = torch.argmax(cls_score, dim=1, keepdim=False)
-            acc = metric(preds, labels)
-            cnn_accuracies.append(acc.item() * 100)
-
-            if exemplar_class_means is not None:
-                repr_ = []
-                for batch_data in pred_:
-                    repr_.append(batch_data['repr_'])
-                repr_ = torch.cat(repr_, dim=0)
-                repr_ = repr_.reshape(-1, repr_.size(1))
-
-                batch_size, dims = repr_.shape
-                num_classes = exemplar_class_means.size(0)
-                repr_broadcast = repr_.unsqueeze(dim=1).expand(batch_size, num_classes, dims)
-                # dist.shape =  [batch_size, num_classes]
-                # dist = torch.linalg.vector_norm(repr_broadcast - exemplar_class_means, ord=2, dim=2)
-                # preds_nme = torch.argmin(dist, dim=1, keepdim=False)
-
-                similarity = F.cosine_similarity(repr_broadcast, exemplar_class_means, dim=-1)
-                preds_nme = torch.argmax(similarity, dim=1, keepdim=False)
-                nme_acc = metric(preds_nme, labels)
-                nme_accuracies.append(nme_acc.item() * 100)
-        print('Accuracy across task:', cnn_accuracies)
+            num_samples = len(ds_list[task_idx])
+            acc = metric(preds[start: start + num_samples], labels[start: start + num_samples])  # no shuffle
+            cnn_accuracies.update(acc.item() * 100, num_samples)
+            start += num_samples
 
         if exemplar_class_means is not None:
-            print('Accuracy across task (nme):', nme_accuracies)
-            self.cil_model.extract_repr = False     # reset flag
+            repr_ = []
+            for batch_data in pred_:
+                repr_.append(batch_data['repr_'])
+            repr_ = torch.cat(repr_, dim=0)
+            repr_ = repr_.reshape(-1, repr_.size(1))
+
+            batch_size, dims = repr_.shape
+            num_classes = exemplar_class_means.size(0)
+            repr_broadcast = repr_.unsqueeze(dim=1).expand(batch_size, num_classes, dims)
+
+            similarity = F.cosine_similarity(repr_broadcast, exemplar_class_means, dim=-1)
+            preds_nme = torch.argmax(similarity, dim=1, keepdim=False)
+
+            start = 0
+            for task_idx in range(self.current_task + 1):
+                num_samples = len(ds_list[task_idx])
+                nme_acc = metric(preds_nme[start: start + num_samples], labels[start: start + num_samples])
+                nme_accuracies.update(nme_acc.item() * 100, num_samples)
+                start += num_samples
+        print('Task {} Accuracies (CNN): {}\nAvg Accuracy (CNN): {}'.format(self.current_task,
+                                                                            cnn_accuracies.values,
+                                                                            cnn_accuracies.avg))
+
+        if exemplar_class_means is not None:
+            print('Task {} Accuracies (NME): {}\nAvg Accuracy (NME): {}'.format(self.current_task,
+                                                                                nme_accuracies.values,
+                                                                                nme_accuracies.avg))
+            self.cil_model.extract_repr = False  # reset flag
             return cnn_accuracies, nme_accuracies
         return cnn_accuracies
 
@@ -818,41 +864,49 @@ class CILTrainer:
         tmp = self._current_task
         cnn_accuracies = []
         nme_accuracies = []
+
+        print('Build test dataset')
         for task_idx in range(self.num_tasks):
-            self._current_task = task_idx
             self.data_module.config.data.test.ann_file = str(
-                self.data_module.task_splits_ann_files['val'][self.current_task])
+                self.data_module.task_splits_ann_files['val'][task_idx])
             self.data_module.test_datasets.append(build_dataset(self.config.data.test))
 
-            self.cil_model.current_model.update_fc(self.num_classes())
+        for task_idx in range(self.num_tasks):
+            self._current_task = task_idx
+            self.cil_model.current_model.update_fc(self.num_classes(self._current_task))
             self.cil_model.current_model.load_state_dict(
                 torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task))
             )
             if test_nme:
                 exemplar_class_means = self._get_exemplar_class_means(task_idx, override_class_mean_ckpt=False)
-                cnn_task_i_accuracies, nme_task_i_accuracies = self._testing(exemplar_class_means=exemplar_class_means)
+                cnn_task_i_accuracies, nme_task_i_accuracies = self._testing(exemplar_class_means=exemplar_class_means,
+                                                                             task_indices=[0, task_idx])
                 cnn_accuracies.append(cnn_task_i_accuracies)
                 nme_accuracies.append(nme_task_i_accuracies)
             else:
-                cnn_task_i_accuracies = self._testing()
+                cnn_task_i_accuracies = self._testing(task_indices=[0, task_idx])
                 cnn_accuracies.append(cnn_task_i_accuracies)
 
         print('CNN accuracies')
-        cnn_pretty_table = print_mean_accuracy(cnn_accuracies, [len(class_indices) for class_indices in self.task_splits[self.starting_task: self.ending_task+1]])
+        cnn_pretty_table = print_mean_accuracy(cnn_accuracies, [len(class_indices) for class_indices in
+                                                                self.task_splits[
+                                                                self.starting_task: self.ending_task + 1]])
         print(cnn_pretty_table)
         with open(self.work_dir / 'cnn_result.txt', 'w') as f:
-            f.write(cnn_pretty_table)
+            f.write('CNN Accuracies' + cnn_pretty_table + '\n')
         if test_nme:
             print('NME accuracies')
-            nme_pretty_table = print_mean_accuracy(nme_accuracies, [len(class_indices) for class_indices in self.task_splits[self.starting_task: self.ending_task+1]])
+            nme_pretty_table = print_mean_accuracy(nme_accuracies, [len(class_indices) for class_indices in
+                                                                    self.task_splits[
+                                                                    self.starting_task: self.ending_task + 1]])
             print(nme_pretty_table)
             with open(self.work_dir / 'nme_result.txt', 'w') as f:
-                f.write(nme_pretty_table)
+                f.write('NME Accuracies' + nme_pretty_table + '\n')
 
         self._current_task = tmp  # reset state
 
     def single_ckpt_testing(self, ckpt_file: str, test_nme=True):
-        print("Load ckpt from",  ckpt_file)
+        print("Load ckpt from", ckpt_file)
         self.cil_model.load_state_dict(torch.load(ckpt_file, map_location='cuda:0')['state_dict'])
 
         if test_nme:
@@ -878,7 +932,7 @@ class CILTrainer:
                 self.data_module.task_splits_ann_files['val'][self.current_task])
             self.data_module.test_datasets.append(build_dataset(self.config.data.test))
         self._current_task = self.ending_task
-        self._testing(val_test='test', exemplar_class_means=exemplar_class_means)
+        self._testing(val_test='test', exemplar_class_means=exemplar_class_means, task_indices=[0, self._current_task])
 
     def _get_exemplar_class_means(self, task_idx: int, override_class_mean_ckpt=False):
         # load class mean from file
@@ -891,9 +945,9 @@ class CILTrainer:
         else:
             print('Begin extract class mean from exemplar')
             self.cil_model.extract_repr = True
-            self.cil_model.current_model.update_fc(self.num_classes())
+            self.cil_model.current_model.update_fc(self.num_classes(self._current_task))
 
-            self.data_module.combine_all_exemplar_ann_files(task_idx)   # prevent error from multiprocessing
+            self.data_module.combine_all_exemplar_ann_files(task_idx)  # prevent error from multiprocessing
             self.data_module.predict_dataloader_mode = 'feature_extraction_on_exemplar'
             self.data_module.predict_dataset_task_idx = task_idx
             pred_ = self.predict()
@@ -905,7 +959,7 @@ class CILTrainer:
 
             label = torch.cat([batch_data['label'] for batch_data in pred_], dim=0).squeeze(dim=1)
             class_means = []
-            for class_idx in range(self.num_classes()):
+            for class_idx in range(self.num_classes(task_idx)):
                 indices = (label == class_idx).nonzero().squeeze()
                 class_means.append(torch.mean(repr_[indices], dim=0))
 
@@ -930,7 +984,7 @@ class CILTrainer:
         predictions = []
         for f in writer_tmp_dir.glob('predictions_rank_*'):
             predictions.extend(torch.load(f))
-        
+
         print("Number of predictions:", len(predictions))
         print("removing", writer_tmp_dir)
         shutil.rmtree(writer_tmp_dir)
@@ -943,7 +997,7 @@ class PredictWriter(BasePredictionWriter):
         self.output_dir = output_dir
 
     def write_on_epoch_end(
-        self, trainer, pl_module: pl.LightningModule, predictions: List[Any], batch_indices: List[Any]
+            self, trainer, pl_module: pl.LightningModule, predictions: List[Any], batch_indices: List[Any]
     ):
         save_location = self.output_dir / "predictions_rank_{}.pt".format(trainer.global_rank)
         torch.save(predictions[0], save_location)
