@@ -493,7 +493,7 @@ class BaseCIL(pl.LightningModule):
         imgs, labels = batch_data['imgs'], batch_data['label']
         losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
         if self.use_kd and self.current_task > 0:
-            kd_loss = 0
+            total_kd_loss = 0
             kd_criterion = nn.MSELoss()
             self.prev_model.eval()
             with torch.no_grad():
@@ -507,11 +507,17 @@ class BaseCIL(pl.LightningModule):
                 if self.config.kd_exemplar_only:
                     indices = (batch_data['label'].view(-1) < previous_task_num_classes).nonzero().squeeze()
                     if indices.nelement():
-                        kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features[indices],
-                                                                           prev_model_features[indices])
+                        # kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features[indices],
+                        #                                                    prev_model_features[indices])
+                        kd_loss = kd_criterion(current_model_features[indices], prev_model_features[indices])
+                    else:
+                        kd_loss = 0
                 else:
-                    kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features, prev_model_features)
-            losses['kd_loss'] = kd_loss
+                    # kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features, prev_model_features)
+                    kd_loss = kd_criterion(current_model_features, prev_model_features)
+                losses[m_name] = kd_loss.item()
+                total_kd_loss += scale_factor * kd_weight * kd_loss
+            losses['kd_loss'] = total_kd_loss
         else:
             losses['kd_loss'] = 0.
 
