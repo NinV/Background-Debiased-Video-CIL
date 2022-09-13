@@ -37,6 +37,7 @@ def parse_args():
     parser.add_argument('--num_epochs_per_task', type=int)
     parser.add_argument('--cbf_num_epochs_per_task', type=int)
     parser.add_argument('--kd_exemplar_only', action='store_true', help='Only Apply KD on exemplar')
+    parser.add_argument('--log_every_n_steps', type=int, default=2)
     args = parser.parse_args()
 
     # cfg_dict are used for updating the configurations from config file

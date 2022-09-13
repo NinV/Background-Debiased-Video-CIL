@@ -11,6 +11,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import BasePredictionWriter
+from pytorch_lightning.loggers import WandbLogger
 import torchmetrics.classification
 from mmcv.runner import build_optimizer
 from mmcv.utils.config import Config as mmcvConfig
@@ -470,6 +471,10 @@ class BaseCIL(pl.LightningModule):
     def num_classes(self, task_idx):
         return self.controller.num_classes(task_idx)
 
+    @property
+    def training_phase(self):
+        return self.controller.training_phase
+
     # others
     def _extract_repr(self):
         # https://mmaction2.readthedocs.io/en/latest/_modules/mmaction/models/heads/tsm_head.html#TSMHead
@@ -488,7 +493,7 @@ class BaseCIL(pl.LightningModule):
         imgs, labels = batch_data['imgs'], batch_data['label']
         losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
         if self.use_kd and self.current_task > 0:
-            kd_loss = 0
+            total_kd_loss = 0
             kd_criterion = nn.MSELoss()
             self.prev_model.eval()
             with torch.no_grad():
@@ -502,18 +507,26 @@ class BaseCIL(pl.LightningModule):
                 if self.config.kd_exemplar_only:
                     indices = (batch_data['label'].view(-1) < previous_task_num_classes).nonzero().squeeze()
                     if indices.nelement():
-                        kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features[indices],
-                                                                           prev_model_features[indices])
+                        # kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features[indices],
+                        #                                                    prev_model_features[indices])
+                        kd_loss = kd_criterion(current_model_features[indices], prev_model_features[indices])
+                    else:
+                        kd_loss = 0
                 else:
-                    kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features, prev_model_features)
-            losses['kd_loss'] = kd_loss
+                    # kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features, prev_model_features)
+                    kd_loss = kd_criterion(current_model_features, prev_model_features)
+                losses[m_name] = kd_loss.item()
+                total_kd_loss += scale_factor * kd_weight * kd_loss
+            losses['kd_loss'] = total_kd_loss
         else:
             losses['kd_loss'] = 0.
 
         batch_size = imgs.shape[0]
         for loss_name, loss_value in losses.items():
-            self.log('train_' + loss_name, losses[loss_name], on_step=True, on_epoch=True, prog_bar=True, logger=True,
-                     batch_size=batch_size)
+            # self.log('train_' + loss_name, losses[loss_name], on_step=True, on_epoch=True, prog_bar=True, logger=True,
+            #          batch_size=batch_size)
+            self.log('[{}_Task_{}]{}'.format(self.training_phase, self.current_task, loss_name),
+                     losses[loss_name], logger=True, batch_size=batch_size)
 
         loss = losses['kd_loss'] + losses['loss_cls']
         if 'loss_bg_mixed' in losses:
@@ -561,6 +574,7 @@ class CILTrainer:
         self.ending_task = config.ending_task  # TODO: fix this later
         self.max_epochs = self.num_tasks * self.num_epoch_per_task
 
+        # setup data module
         self.data_module = CILDataModule(config)
         self.data_module.controller = self
         self.cil_model = BaseCIL(config)
@@ -617,15 +631,21 @@ class CILTrainer:
 
         self.data_module.build_validation_datasets()
 
+        # dump config
         if dump_config:
             self.config.dump(str(self.work_dir / 'config.py'))
 
+        # select strategy based on number of gpus
         if isinstance(self.config.gpu_ids, list) and len(self.config.gpu_ids) > 1:
             self.strategy = 'ddp_spawn'
         elif isinstance(self.config.gpu_ids, int) and self.config.gpu_ids > 1:
             self.strategy = 'ddp_spawn'
         else:
             self.strategy = None
+
+        # logger
+        self.logger = WandbLogger(project='CILVideo')
+        self.training_phase = None      # ['inc_step', 'cbf_step']
 
     @property
     def current_task(self):
@@ -643,7 +663,7 @@ class CILTrainer:
         return self.data_module.accumulate_task_size_list[task_idx]
 
     def train_task(self):
-        # lr_monitor = LearningRateMonitor(logging_interval='step')
+        self.training_phase = 'inc_step'
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.num_epochs_per_task,
@@ -652,12 +672,14 @@ class CILTrainer:
                              # callbacks=[lr_monitor]
                              enable_checkpointing=False,
                              gradient_clip_val=1.0,
-                             strategy=self.strategy
+                             strategy=self.strategy,
+                             logger=self.logger,
+                             log_every_n_steps=self.config.log_every_n_steps
                              )
         trainer.fit(self.cil_model, self.data_module)
 
     def train_cbf(self):
-        # self.cil_model.current_model.freeze_backbone()
+        self.training_phase = 'cbf_step'
         print('Class Balance Fine-tuning. Freeze backbone: {}'.format(not self.config.cbf_train_backbone))
         cbf_dataset = self.data_module.build_cbf_dataset()
         loader = DataLoader(cbf_dataset,
@@ -673,7 +695,9 @@ class CILTrainer:
                              # limit_train_batches=100,
                              gradient_clip_val=1.0,
                              enable_checkpointing=False,
-                             strategy=self.strategy
+                             strategy=self.strategy,
+                             logger=self.logger,
+                             log_every_n_steps=self.config.log_every_n_steps
                              )
         self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
