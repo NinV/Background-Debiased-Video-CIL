@@ -29,7 +29,7 @@ task_splits = [
 # select one of ['base', 'oracle', 'finetune']
 methods = 'base'
 starting_task = 0
-ending_task = 9
+ending_task = 18
 use_nme_classifier = False
 use_cbf = False
 cbf_train_backbone = False
@@ -84,10 +84,12 @@ model = dict(
 kd_modules_names = ['backbone.layer1', 'backbone.layer2', 'backbone.layer3', 'backbone.layer4', 'cls_head.avg_pool']
 repr_hook = 'cls_head.avg_pool'  # extract representation
 kd_exemplar_only = False
-kd_weight_by_module = [0.5, 0.5, 0.5, 0.5, 10]
-adaptive_scale_factors = [1.0, 3.0659419433511785, 3.22490309931942, 3.3763886032268267, 3.521363372331802,
-                          3.6606010435446255, 3.794733192202055, 3.924283374069717, 4.049691346263317,
-                          4.171330722922842]
+kd_weight_by_module = [0.5, 0.5, 0.5, 0.5, 1]
+adaptive_scale_factors = [1.0, 4.219004621945797, 4.33589667773576, 4.449719092257398, 4.560701700396552,
+                          4.669047011971501, 4.774934554525329, 4.878524367060187, 4.979959839195493,
+                          5.079370039680118, 5.176871642217914, 5.272570530585627, 5.366563145999495,
+                          5.458937625582473, 5.549774770204643, 5.639148871948674, 5.727128425310541,
+                          5.813776741499453, 5.89915248150105]
 # cil optimizer and lr_scheduler
 optimizer = dict(
     type='SGD',
@@ -104,7 +106,7 @@ cbf_num_epochs_per_task = 50
 cbf_optimizer = dict(
     type='SGD',
     constructor='CILTSMOptimizerConstructorImprovised',
-    paramwise_cfg=dict(fc_lr_scale_factor=5.0),
+    paramwise_cfg=dict(fc_lr_scale_factor=1.0),
     lr=0.01,
     momentum=0.9,
     weight_decay=0.0001)
@@ -142,6 +144,7 @@ val_pipeline = [
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
     dict(type='CenterCrop', crop_size=224),
+    # dict(type='ThreeCrop', crop_size=256),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
     dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
@@ -157,8 +160,8 @@ test_pipeline = [
         test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    # dict(type='CenterCrop', crop_size=224),
-    dict(type='ThreeCrop', crop_size=256),
+    dict(type='CenterCrop', crop_size=224),
+    # dict(type='ThreeCrop', crop_size=256),
     # dict(type='TenCrop', crop_size=256),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
