@@ -29,7 +29,7 @@ task_splits = [
 # select one of ['base', 'oracle', 'finetune']
 methods = 'base'
 starting_task = 0
-ending_task = 9
+ending_task = 18
 use_nme_classifier = False
 use_cbf = False
 cbf_train_backbone = False
@@ -143,8 +143,8 @@ val_pipeline = [
     dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8, test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    # dict(type='CenterCrop', crop_size=224),
-    dict(type='ThreeCrop', crop_size=256),
+    dict(type='CenterCrop', crop_size=224),
+    # dict(type='ThreeCrop', crop_size=256),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
     dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
@@ -160,8 +160,8 @@ test_pipeline = [
         test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    # dict(type='CenterCrop', crop_size=224),
-    dict(type='ThreeCrop', crop_size=256),
+    dict(type='CenterCrop', crop_size=224),
+    # dict(type='ThreeCrop', crop_size=256),
     # dict(type='TenCrop', crop_size=256),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),

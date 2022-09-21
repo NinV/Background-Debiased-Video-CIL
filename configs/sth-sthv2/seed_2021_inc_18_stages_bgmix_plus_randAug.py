@@ -15,25 +15,19 @@ testing_workers_per_gpu = 2
 
 work_dir = 'work_dirs/sth-sthv2-seed_2021_inc_18_stages'
 
-task_splits = [
-    [147, 167, 0, 133, 66, 8, 77, 45, 28, 13, 139, 72, 74, 129, 34, 121, 141, 80, 104, 52, 42, 56, 79, 132, 148, 150,
-     14, 111, 22, 35, 168, 23, 149, 2, 58, 160, 112, 10, 6, 118, 30, 153, 36, 65, 76, 155, 4, 68, 154, 64, 12, 91, 73,
-     170, 59, 55, 81, 43, 145, 99, 96, 92, 24, 113, 69, 15, 135, 83, 41, 130, 146, 46, 171, 97, 16, 67, 39, 29, 86, 88,
-     61, 48, 37, 158],
-    [125, 60, 47, 26, 166, 173, 90, 38, 161, 165],
-    [98, 3, 87, 95, 20, 32, 131, 18, 107, 127],
-    [126, 31, 134, 136, 75, 122, 84, 137, 143, 138],
-    [103, 105, 100, 9, 51, 162, 119, 108, 27, 115],
-    [117, 156, 50, 89, 17, 78, 11, 53, 40, 82],
-    [19, 106, 169, 114, 25, 164, 159, 172, 71, 142],
-    [151, 5, 120, 163, 123, 54, 144, 49, 63, 124],
-    [110, 1, 7, 101, 33, 70, 102, 140, 152, 93],
-    [21, 157, 62, 44, 94, 109, 128, 57, 85, 116]]
+task_splits = [[147, 167, 0, 133, 66, 8, 77, 45, 28, 13, 139, 72, 74, 129, 34, 121, 141, 80, 104, 52, 42, 56, 79, 132, 
+                148, 150, 14, 111, 22, 35, 168, 23, 149, 2, 58, 160, 112, 10, 6, 118, 30, 153, 36, 65, 76, 155, 4, 68, 
+                154, 64, 12, 91, 73, 170, 59, 55, 81, 43, 145, 99, 96, 92, 24, 113, 69, 15, 135, 83, 41, 130, 146, 46, 
+                171, 97, 16, 67, 39, 29, 86, 88, 61, 48, 37, 158], [125, 60, 47, 26, 166], [173, 90, 38, 161, 165], 
+               [98, 3, 87, 95, 20], [32, 131, 18, 107, 127], [126, 31, 134, 136, 75], [122, 84, 137, 143, 138], 
+               [103, 105, 100, 9, 51], [162, 119, 108, 27, 115], [117, 156, 50, 89, 17], [78, 11, 53, 40, 82], 
+               [19, 106, 169, 114, 25], [164, 159, 172, 71, 142], [151, 5, 120, 163, 123], [54, 144, 49, 63, 124], 
+               [110, 1, 7, 101, 33], [70, 102, 140, 152, 93], [21, 157, 62, 44, 94], [109, 128, 57, 85, 116]]
 
 # select one of ['base', 'oracle', 'finetune']
 methods = 'base'
 starting_task = 0
-ending_task = 9
+ending_task = 18
 use_nme_classifier = False
 use_cbf = False
 cbf_train_backbone = False
@@ -147,8 +141,8 @@ val_pipeline = [
     dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8, test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    # dict(type='CenterCrop', crop_size=224),
-    dict(type='ThreeCrop', crop_size=256),
+    dict(type='CenterCrop', crop_size=224),
+    # dict(type='ThreeCrop', crop_size=256),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
     dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
@@ -164,8 +158,8 @@ test_pipeline = [
         test_mode=True),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
-    # dict(type='CenterCrop', crop_size=224),
-    dict(type='ThreeCrop', crop_size=256),
+    dict(type='CenterCrop', crop_size=224),
+    # dict(type='ThreeCrop', crop_size=256),
     # dict(type='TenCrop', crop_size=256),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
