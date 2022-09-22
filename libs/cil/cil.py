@@ -543,10 +543,11 @@ class BaseCIL(pl.LightningModule):
             repr_ = self._extract_repr()
             batch_size = batch_data['imgs'].size(0)
             embedding_size = repr_.size(-1)
-            repr_ = repr_.view(batch_size, -1, embedding_size)
+            repr_ = repr_.view(batch_size, -1, embedding_size)      # (batch_size, num_crops, dim)
             repr_ = F.normalize(repr_, p=2, dim=-1)
-            repr_ = torch.mean(repr_, dim=1, keepdim=False)
-            result['repr_'] = repr_
+            result['repr_'] = repr_                                 # (batch_size, num_crops, dim)
+            result['mean_crops_repr_'] = torch.mean(repr_, dim=1, keepdim=False)    # (batch_size, dim)
+
             assert result['repr_'].size(0) == result['cls_score'].size(0)
         if self.extract_meta:
             for k, v in batch_data.items():
@@ -778,26 +779,20 @@ class CILTrainer:
         """
         self.cil_model.extract_repr = True  # to extract features
         self.cil_model.extract_meta = True  # and other meta data
-        prediction_with_meta = []
-        for _ in range(self.config.data.features_extraction_epochs):
-            self.data_module.predict_dataloader_mode = 'feature_extraction_on_train_dataset'
-            self.data_module.predict_dataset_task_idx = self.current_task
-            pred_ = self.predict()
+        self.data_module.predict_dataloader_mode = 'feature_extraction_on_train_dataset'
 
-            prediction_with_meta.append(pred_)
+        self.data_module.predict_dataset_task_idx = self.current_task
+        pred_ = self.predict()
+
         self.cil_model.extract_repr = False  # reset flag
         self.cil_model.extract_meta = False
 
         # collate data
-        frame_dir = [batch_data['frame_dir'] for batch_data in prediction_with_meta[0]]
-        frame_dir = [dir_name for batch_data in frame_dir for dir_name in batch_data]  # flatten list
-
         repr_ = []
         cls_score = []
-        for i in range(self.config.data.features_extraction_epochs):
-            for batch_data in prediction_with_meta[i]:
-                repr_.append(batch_data['repr_'])
-                cls_score.append(batch_data['cls_score'])
+        for batch_data in pred_:
+            repr_.append(batch_data['mean_crops_repr_'])
+            cls_score.append(batch_data['cls_score'])
         repr_ = torch.cat(repr_, dim=0)
         repr_ = repr_.reshape(-1, self.config.data.features_extraction_epochs, repr_.size(1))
 
@@ -805,13 +800,12 @@ class CILTrainer:
         cls_score = cls_score.reshape(-1, self.config.data.features_extraction_epochs, cls_score.size(1))
 
         collated_prediction_with_meta = {
-            # the data loader does not shuffle samples. So we can use the meta of the first epoch
-            'frame_dir': frame_dir,
-            'total_frames': torch.cat([batch_data['total_frames'] for batch_data in prediction_with_meta[0]], dim=0),
-            'label': torch.cat([batch_data['label'] for batch_data in prediction_with_meta[0]], dim=0).squeeze(dim=1),
-            'clip_len': torch.cat([batch_data['clip_len'] for batch_data in prediction_with_meta[0]], dim=0),
-            'num_clips': torch.cat([batch_data['num_clips'] for batch_data in prediction_with_meta[0]], dim=0),
-            'frame_inds': torch.cat([batch_data['frame_inds'] for batch_data in prediction_with_meta[0]], dim=0),
+            'frame_dir': torch.cat([batch_data['frame_dir'] for batch_data in pred_], dim=0),
+            'total_frames': torch.cat([batch_data['total_frames'] for batch_data in pred_], dim=0),
+            'label': torch.cat([batch_data['label'] for batch_data in pred_], dim=0).squeeze(dim=1),
+            'clip_len': torch.cat([batch_data['clip_len'] for batch_data in pred_], dim=0),
+            'num_clips': torch.cat([batch_data['num_clips'] for batch_data in pred_], dim=0),
+            'frame_inds': torch.cat([batch_data['frame_inds'] for batch_data in pred_], dim=0),
             'repr_': repr_,
             'cls_score': cls_score
         }
@@ -856,15 +850,21 @@ class CILTrainer:
             repr_ = []
             for batch_data in pred_:
                 repr_.append(batch_data['repr_'])
-            repr_ = torch.cat(repr_, dim=0)
-            repr_ = repr_.reshape(-1, repr_.size(1))
+            repr_ = torch.cat(repr_, dim=0)             # (num_samples, num_crops, dim)
+            num_samples, num_crops, dim = repr_.size(0), repr_.size(1), repr_.size(2),
+            repr_ = repr_.reshape(-1, repr_.size(2))    # (num_samples x num_crops, dim)
 
-            batch_size, dims = repr_.shape
             num_classes = exemplar_class_means.size(0)
-            repr_broadcast = repr_.unsqueeze(dim=1).expand(batch_size, num_classes, dims)
 
-            similarity = F.cosine_similarity(repr_broadcast, exemplar_class_means, dim=-1)
-            preds_nme = torch.argmax(similarity, dim=1, keepdim=False)
+            # batch_size, dims = repr_.shape
+            # repr_broadcast = repr_.unsqueeze(dim=1).expand(batch_size, num_classes, dims)
+            # similarity = F.cosine_similarity(repr_broadcast, exemplar_class_means, dim=-1)
+            # similarity = torch.mean(similarity.reshape(num_samples, num_crops, num_classes), dim=1, keepdim=False)
+            # preds_nme = torch.argmax(similarity, dim=1, keepdim=False)
+
+            dist = torch.cdist(repr_, exemplar_class_means)        # num_samples x num_crops, num_classes
+            dist = torch.mean(dist.reshape(num_samples, num_crops, num_classes), dim=1, keepdim=False)
+            preds_nme = torch.argmin(dist, dim=1, keepdim=False)
 
             start = 0
             for task_idx in range(self.current_task + 1):
@@ -977,7 +977,7 @@ class CILTrainer:
             pred_ = self.predict()
             repr_ = []
             for batch_data in pred_:
-                repr_.append(batch_data['repr_'])
+                repr_.append(batch_data['mean_crops_repr_'])
             repr_ = torch.cat(repr_, dim=0)
             repr_ = repr_.reshape(-1, repr_.size(1))
 
