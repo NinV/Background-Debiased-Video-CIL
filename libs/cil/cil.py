@@ -515,7 +515,7 @@ class BaseCIL(pl.LightningModule):
                 else:
                     # kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features, prev_model_features)
                     kd_loss = kd_criterion(current_model_features, prev_model_features)
-                losses[m_name] = kd_loss.item()
+                losses[m_name] = kd_loss
                 total_kd_loss += scale_factor * kd_weight * kd_loss
             losses['kd_loss'] = total_kd_loss
         else:
@@ -687,7 +687,8 @@ class CILTrainer:
                             batch_size=self.config.videos_per_gpu,
                             num_workers=self.config.workers_per_gpu,
                             pin_memory=True,
-                            shuffle=True)
+                            shuffle=True,
+                            persistent_workers=True)
 
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
