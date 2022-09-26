@@ -84,7 +84,7 @@ model = dict(
 kd_modules_names = ['backbone.layer1', 'backbone.layer2', 'backbone.layer3', 'backbone.layer4', 'cls_head.avg_pool']
 repr_hook = 'cls_head.avg_pool'  # extract representation
 kd_exemplar_only = False
-kd_weight_by_module = [1.0, 1.0, 1.0, 1.0, 0.01]
+kd_weight_by_module = [0.01, 0.01, 0.01, 0.01, 0.01]
 adaptive_scale_factors = [1.0, 5.1478150704935, 5.244044240850758, 5.338539126015656, 5.431390245600108,
                           5.522680508593631, 5.612486080160912, 5.70087712549569, 5.787918451395113, 5.873670062235365,
                           5.958187643906492, 6.041522986797286, 6.123724356957945, 6.2048368229954285,
