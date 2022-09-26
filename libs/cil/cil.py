@@ -853,19 +853,21 @@ class CILTrainer:
                 repr_.append(batch_data['repr_'])
             repr_ = torch.cat(repr_, dim=0)             # (num_samples, num_crops, dim)
             num_samples, num_crops, dim = repr_.size(0), repr_.size(1), repr_.size(2),
-            repr_ = repr_.reshape(-1, repr_.size(2))    # (num_samples x num_crops, dim)
+            repr_ = repr_.reshape(-1, repr_.size(2))    # (num_samples * num_crops, dim)
 
             num_classes = exemplar_class_means.size(0)
 
-            # batch_size, dims = repr_.shape
-            # repr_broadcast = repr_.unsqueeze(dim=1).expand(batch_size, num_classes, dims)
-            # similarity = F.cosine_similarity(repr_broadcast, exemplar_class_means, dim=-1)
-            # similarity = torch.mean(similarity.reshape(num_samples, num_crops, num_classes), dim=1, keepdim=False)
-            # preds_nme = torch.argmax(similarity, dim=1, keepdim=False)
+            # cosine distance
+            size, dims = repr_.shape        # size = num_samples * num_crops
+            repr_broadcast = repr_.unsqueeze(dim=1).expand(size, num_classes, dims)
+            similarity = F.cosine_similarity(repr_broadcast, exemplar_class_means, dim=-1)
+            similarity = torch.mean(similarity.reshape(num_samples, num_crops, num_classes), dim=1, keepdim=False)
+            preds_nme = torch.argmax(similarity, dim=1, keepdim=False)
 
-            dist = torch.cdist(repr_, exemplar_class_means)        # num_samples x num_crops, num_classes
-            dist = torch.mean(dist.reshape(num_samples, num_crops, num_classes), dim=1, keepdim=False)
-            preds_nme = torch.argmin(dist, dim=1, keepdim=False)
+            # Euclidean distance
+            # dist = torch.cdist(repr_, exemplar_class_means)        # num_samples * num_crops, num_classes
+            # dist = torch.mean(dist.reshape(num_samples, num_crops, num_classes), dim=1, keepdim=False)
+            # preds_nme = torch.argmin(dist, dim=1, keepdim=False)
 
             start = 0
             for task_idx in range(self.current_task + 1):
