@@ -801,7 +801,7 @@ class CILTrainer:
         cls_score = cls_score.reshape(-1, self.config.data.features_extraction_epochs, cls_score.size(1))
 
         collated_prediction_with_meta = {
-            'frame_dir': torch.cat([batch_data['frame_dir'] for batch_data in pred_], dim=0),
+            'frame_dir': [frame_dir for batch_data in pred_ for frame_dir in batch_data['frame_dir']],
             'total_frames': torch.cat([batch_data['total_frames'] for batch_data in pred_], dim=0),
             'label': torch.cat([batch_data['label'] for batch_data in pred_], dim=0).squeeze(dim=1),
             'clip_len': torch.cat([batch_data['clip_len'] for batch_data in pred_], dim=0),
