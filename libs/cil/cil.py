@@ -22,6 +22,7 @@ from ..module_hooks import OutputHook
 from .memory_selection import Herding
 from ..utils import print_mean_accuracy, build_lr_scheduler, AverageMeter
 from ..loader.comix_loader import BackgroundMixDataset
+from .podnet import PODNet
 
 
 class CILDataModule(pl.LightningDataModule):
@@ -494,7 +495,11 @@ class BaseCIL(pl.LightningModule):
         losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
         if self.use_kd and self.current_task > 0:
             total_kd_loss = 0
-            kd_criterion = nn.MSELoss()
+            if hasattr(self.config, 'podnet_method'):
+                kd_criterion = PODNet(pod_method=self.config.podnet_method)
+            else:
+                # kd_criterion = nn.MSELoss()
+                kd_criterion = PODNet(pod_method='pixels')
             self.prev_model.eval()
             with torch.no_grad():
                 self.prev_model.forward_test(imgs)
@@ -507,13 +512,10 @@ class BaseCIL(pl.LightningModule):
                 if self.config.kd_exemplar_only:
                     indices = (batch_data['label'].view(-1) < previous_task_num_classes).nonzero().squeeze()
                     if indices.nelement():
-                        # kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features[indices],
-                        #                                                    prev_model_features[indices])
                         kd_loss = kd_criterion(current_model_features[indices], prev_model_features[indices])
                     else:
                         kd_loss = 0
                 else:
-                    # kd_loss += scale_factor * kd_weight * kd_criterion(current_model_features, prev_model_features)
                     kd_loss = kd_criterion(current_model_features, prev_model_features)
                 losses[m_name] = kd_loss
                 total_kd_loss += scale_factor * kd_weight * kd_loss
