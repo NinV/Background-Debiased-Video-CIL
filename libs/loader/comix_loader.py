@@ -127,7 +127,7 @@ class BackgroundMixDataset(RawframeDataset):
             return bg_img, bg_idx
 
         video = random.choice(self.video_infos)
-        frame_index = random.randint(0, video['total_frames'] - 1)
+        frame_index = random.randint(self.start_index, video['total_frames'] - 1 + self.start_index)
         bg_img = read_image(osp.join(video['frame_dir'], self.filename_tmpl.format(frame_index))).float()
         return bg_img, -2       # to pass sanity check
 
