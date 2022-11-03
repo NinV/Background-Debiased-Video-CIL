@@ -19,7 +19,9 @@ class BackgroundMixDataset(RawframeDataset):
                  ann_file,
                  pipeline,
                  bg_dir: str,
-                 check_bg_dir=True,
+                 extract_bg_if_not_found=True,      # extract background with TMF if not found
+                 back_ground_from_bg_dir=True,      # find background in folders
+                 map_bg_to_video=True,              # each video associated with a background (same prefix)
                  bg_image_extension='.jpg',
                  bg_resize=256,
                  bg_crop_size=(224, 224),
@@ -73,16 +75,29 @@ class BackgroundMixDataset(RawframeDataset):
         self.alpha = alpha
         self.prob = prob
         self.with_randAug = with_randAug
-        self.bg_files = []
-        if check_bg_dir:
-            for idx, info in tqdm(enumerate(self.video_infos), total=len(self.video_infos),
-                                  desc='check background images'):
-                data_path = pathlib.Path(self.video_infos[idx]['frame_dir'])
-                bg_image_file = (self.bg_dir / data_path.name).with_suffix(self.bg_image_extension)
+        self.extract_bg_if_not_found = extract_bg_if_not_found
+        self.back_ground_from_bg_dir = back_ground_from_bg_dir
+        self.map_bg_to_video = map_bg_to_video
 
-                if not bg_image_file.exists():
-                    bg_image_file = bg_extraction_tmf(data_path, bg_image_file)
-                self.bg_files.append(str(bg_image_file))
+        if self.back_ground_from_bg_dir:
+            if map_bg_to_video:   # mapping bg_file to video_file
+                self.bg_files = []
+
+                for idx, info in tqdm(enumerate(self.video_infos), total=len(self.video_infos),
+                                      desc='check background images'):
+                    data_path = pathlib.Path(self.video_infos[idx]['frame_dir'])
+                    bg_image_file = (self.bg_dir / data_path.name).with_suffix(self.bg_image_extension)
+
+                    if bg_image_file.exists():
+                        self.bg_files.append(str(bg_image_file))
+
+                    elif self.extract_bg_if_not_found:
+                        bg_image_file = bg_extraction_tmf(data_path, bg_image_file)
+                        self.bg_files.append(str(bg_image_file))
+            else:
+                self.bg_files = list(self.bg_dir.glob("*"))
+        else:
+            self.bg_files = []
 
     def prepare_train_frames(self, idx):
         """Prepare the frames for training given the index."""
@@ -105,9 +120,19 @@ class BackgroundMixDataset(RawframeDataset):
                 assert result['bg_idx'] != -1
         return result
 
+    def _get_bg_image(self):
+        if self.back_ground_from_bg_dir:
+            bg_idx = torch.randint(len(self.bg_files), (1,)).item()
+            bg_img = read_image(self.bg_files[bg_idx]).float()
+            return bg_img, bg_idx
+
+        video = random.choice(self.video_infos)
+        frame_index = random.randint(0, video['total_frames'] - 1)
+        bg_img = read_image(osp.join(video['frame_dir'], self.filename_tmpl.format(frame_index))).float()
+        return bg_img, -2       # to pass sanity check
+
     def _mix_background(self, result):
-        bg_idx = torch.randint(len(self.bg_files), (1,)).item()
-        bg_img = read_image(self.bg_files[bg_idx]).float()
+        bg_img, bg_idx = self._get_bg_image()
         bg_img = self.bg_pipeline(bg_img)
         bg_img = bg_img.view(1, bg_img.size(0), bg_img.size(1), bg_img.size(2))
         blend = result['imgs'] * (1 - self.alpha) + bg_img * self.alpha

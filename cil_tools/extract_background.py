@@ -5,7 +5,7 @@ from typing import List
 import math
 from multiprocessing import Process
 
-from torchvision.transforms import Compose, RandomPerspective
+from torchvision.transforms import Compose, RandomPerspective, RandomResizedCrop, Resize
 from torchvision.io import read_image
 from tqdm import tqdm
 import cv2
@@ -26,6 +26,7 @@ def parse_args():
     parser.add_argument('--max_frames', type=int, default=500)
     parser.add_argument('--size', type=int, default=256)
     parser.add_argument('--method', default='tmf')
+    parser.add_argument('--avg_method', default='median')
     return parser.parse_args()
 
 
@@ -39,7 +40,7 @@ def short_side_resize(img):
 
 
 def bg_extraction_tmf(data_path: pathlib.Path, dest: pathlib.Path,
-                      from_video: bool, interval: int, max_frames: int):
+                      from_video: bool, interval: int, max_frames: int, *args, **kwargs):
     """
     extract background using median temporal filtering
     https://learnopencv.com/simple-background-estimation-in-videos-using-opencv-c-python/
@@ -75,29 +76,36 @@ def bg_extraction_tmf(data_path: pathlib.Path, dest: pathlib.Path,
 
 
 def sim_cam_motion_bg_extract(data_path: pathlib.Path, dest: pathlib.Path,
-                              from_video: bool, interval: int, max_frames: int):
+                              from_video: bool, interval: int, max_frames: int, avg_method:int):
 
-    cam_motion_pipeline = Compose([RandomPerspective(distortion_scale=0.5, p=1, fill=0)])
-    image_files = data_path.glob('*')
+    # cam_motion_pipeline = Compose([RandomPerspective(distortion_scale=0.5, p=1, fill=0)])
+    cam_motion_pipeline = Compose([RandomResizedCrop(size=100)])
+    image_files = list(data_path.glob('*'))
+    image_files.sort()
 
     transform_frames = []
-    for frame_f in image_files:
+    for i, frame_f in enumerate(image_files[:-1:interval]):
+        if i == max_frames:
+            break
         frame = read_image(str(frame_f)).float()
         frame = cam_motion_pipeline(frame).permute(1, 2, 0).numpy()
         frame[frame == 0] = np.nan
         transform_frames.append(frame)
 
-    median_frame = np.nanmedian(transform_frames, axis=0).astype(dtype=np.uint8)
-    cv2.imwrite(str(dest), cv2.cvtColor(median_frame, cv2.COLOR_BGR2RGB))
+    if avg_method == 0:     # 0: median, 1: mean
+        ave_frame = np.nanmedian(transform_frames, axis=0).astype(dtype=np.uint8)
+    else:
+        ave_frame = np.nanmean(transform_frames, axis=0).astype(dtype=np.uint8)
+    cv2.imwrite(str(dest), cv2.cvtColor(ave_frame, cv2.COLOR_BGR2RGB))
 
 
 def bg_extract_multiple(paths: List[pathlib.Path], output_dir: pathlib.Path, from_video: bool,
-                        interval: int, max_frames: int, process_id: int, method):
+                        interval: int, max_frames: int, process_id: int, method, avg_method:int):
     for data_path in tqdm(paths, total=len(paths),
                           desc='Extracting background #{}'.format(process_id),
                           unit='video', position=process_id, leave=False):
 
-        method(data_path, (output_dir / data_path.name).with_suffix('.jpg'), from_video, interval, max_frames)
+        method(data_path, (output_dir / data_path.name).with_suffix('.jpg'), from_video, interval, max_frames, avg_method)
         # pbar.update(1)
 
 
@@ -133,10 +141,20 @@ if __name__ == '__main__':
         method = bg_extraction_tmf
     elif args.method == 'sim_cam':
         method = sim_cam_motion_bg_extract
+    else:
+        raise ValueError
+
+    if args.avg_method == 'median':
+        avg_method = 0
+    elif args.avg_method == 'mean':
+        avg_method = 1
+    else:
+        raise ValueError
+
     processes = []
     for i in range(len(splits)):
         p = Process(target=bg_extract_multiple, args=(splits[i], output_dir, args.from_video,
-                                                      args.interval, args.max_frames, i, method))
+                                                      args.interval, args.max_frames, i, method, avg_method))
         processes.append(p)
         p.start()
 
