@@ -6,7 +6,7 @@ from tqdm import tqdm
 import numpy as np
 import cv2
 import torch
-from torchvision.io import read_image
+from torchvision.io import read_image, ImageReadMode
 from torchvision.transforms import Compose, Normalize, Resize, RandomCrop
 
 from mmaction.datasets import RawframeDataset
@@ -122,14 +122,15 @@ class BackgroundMixDataset(RawframeDataset):
         return result
 
     def _get_bg_image(self):
+        mode = ImageReadMode.RGB
         if self.back_ground_from_bg_dir:
             bg_idx = torch.randint(len(self.bg_files), (1,)).item()
-            bg_img = read_image(self.bg_files[bg_idx]).float()
+            bg_img = read_image(self.bg_files[bg_idx], mode=mode).float()
             return bg_img, bg_idx
 
         video = random.choice(self.video_infos)
         frame_index = random.randint(self.start_index, video['total_frames'] - 1 + self.start_index)
-        bg_img = read_image(osp.join(video['frame_dir'], self.filename_tmpl.format(frame_index))).float()
+        bg_img = read_image(osp.join(video['frame_dir'], self.filename_tmpl.format(frame_index)), mode=mode).float()
         return bg_img, -2       # to pass sanity check
 
     def _mix_background(self, result):
