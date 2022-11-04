@@ -96,6 +96,7 @@ class BackgroundMixDataset(RawframeDataset):
                         self.bg_files.append(str(bg_image_file))
             else:
                 self.bg_files = list(self.bg_dir.glob("*"))
+                self.bg_files = [str(file_path) for file_path in self.bg_files]
         else:
             self.bg_files = []
 
