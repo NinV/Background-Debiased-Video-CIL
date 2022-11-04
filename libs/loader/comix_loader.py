@@ -22,6 +22,7 @@ class BackgroundMixDataset(RawframeDataset):
                  extract_bg_if_not_found=True,      # extract background with TMF if not found
                  back_ground_from_bg_dir=True,      # find background in folders
                  map_bg_to_video=True,              # each video associated with a background (same prefix)
+                 merge_bg_files=True,
                  bg_image_extension='.jpg',
                  bg_resize=256,
                  bg_crop_size=(224, 224),
@@ -78,6 +79,7 @@ class BackgroundMixDataset(RawframeDataset):
         self.extract_bg_if_not_found = extract_bg_if_not_found
         self.back_ground_from_bg_dir = back_ground_from_bg_dir
         self.map_bg_to_video = map_bg_to_video
+        self.merge_bg_files = merge_bg_files
 
         if self.back_ground_from_bg_dir:
             if map_bg_to_video:   # mapping bg_file to video_file

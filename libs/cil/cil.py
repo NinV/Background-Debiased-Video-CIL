@@ -380,7 +380,8 @@ class CILDataModule(pl.LightningDataModule):
 
         if isinstance(source, BackgroundMixDataset):
             source.video_infos.extend(target_.video_infos)
-            source.bg_files.extend(target_.bg_files)
+            if source.merge_bg_files:
+                source.bg_files.extend(target_.bg_files)
         elif isinstance(source, RawframeDataset):
             source.video_infos.extend(target_.video_infos)
         else:
