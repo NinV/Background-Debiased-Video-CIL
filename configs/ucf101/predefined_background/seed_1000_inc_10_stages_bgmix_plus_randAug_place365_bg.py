@@ -194,7 +194,8 @@ data = dict(
         pipeline=train_pipeline,
         alpha=0.5,
         with_randAug=True,
-        extract_bg_if_not_found=False
+        extract_bg_if_not_found=False,
+        map_bg_to_video=False
     ),
     val=dict(
         type=dataset_type,
@@ -203,6 +204,7 @@ data = dict(
         data_prefix=data_root,
         pipeline=val_pipeline,
         extract_bg_if_not_found=False,
+        map_bg_to_video=False,
         test_mode=True),
     test=dict(
         type=dataset_type,
@@ -211,6 +213,7 @@ data = dict(
         data_prefix=data_root,
         pipeline=test_pipeline,
         extract_bg_if_not_found=False,
+        map_bg_to_video=False,
         test_mode=True),
 
     features_extraction=dict(
@@ -220,6 +223,7 @@ data = dict(
         data_prefix=data_root,
         pipeline=features_extraction_pipeline,
         extract_bg_if_not_found=False,
+        map_bg_to_video=False,
         test_mode=True),
     features_extraction_epochs=1,      # this value should be set to 1 if there's no randomness in pipeline
 
@@ -230,6 +234,7 @@ data = dict(
         data_prefix=data_root,
         pipeline=train_pipeline,
         extract_bg_if_not_found=False,
+        map_bg_to_video=False
     ),
 )
 
