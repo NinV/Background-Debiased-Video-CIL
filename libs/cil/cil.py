@@ -666,6 +666,7 @@ class CILTrainer:
 
     def train_task(self):
         self.training_phase = 'inc_step'
+        gradient_clip_val = None if self._current_task == 0 else 1.0
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.num_epochs_per_task,
@@ -673,7 +674,7 @@ class CILTrainer:
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # callbacks=[lr_monitor]
                              enable_checkpointing=False,
-                             gradient_clip_val=1.0,
+                             gradient_clip_val=gradient_clip_val,
                              strategy=self.strategy,
                              logger=self.logger,
                              log_every_n_steps=self.config.log_every_n_steps
@@ -690,13 +691,13 @@ class CILTrainer:
                             pin_memory=True,
                             shuffle=True,
                             persistent_workers=True)
-
+        gradient_clip_val = None if self._current_task == 0 else 1.0
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
                              max_epochs=self.config.cbf_num_epochs_per_task,
                              accumulate_grad_batches=self.config.accumulate_grad_batches,
                              # limit_train_batches=100,
-                             gradient_clip_val=1.0,
+                             gradient_clip_val=gradient_clip_val,
                              enable_checkpointing=False,
                              strategy=self.strategy,
                              logger=self.logger,
