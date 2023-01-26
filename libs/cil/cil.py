@@ -989,7 +989,7 @@ class CILTrainer:
             label = torch.cat([batch_data['label'] for batch_data in pred_], dim=0).squeeze(dim=1)
             class_means = []
             for class_idx in range(self.num_classes(task_idx)):
-                indices = (label == class_idx).nonzero().squeeze()
+                indices = (label == class_idx).nonzero().squeeze(dim=1)
                 class_means.append(torch.mean(repr_[indices], dim=0))
 
             class_means = torch.stack(class_means, dim=0)
