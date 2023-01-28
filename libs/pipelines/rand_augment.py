@@ -229,8 +229,8 @@ class RandAugment:
 
     def __call__(self, results):
         if random.random() < self.prob:
+            results['randAug'] = True
             return self._rand_aug(results)
-
         results['randAug'] = False
         return results
 
@@ -247,7 +247,7 @@ class RandAugment:
             val = (float(self.m) / 30) * float(maxval - minval) + minval
             for i in range(len(results['imgs'])):
                 img = Image.fromarray(results['imgs'][i])
-                # NOTE: For ActorCutMix
+
                 if 'human_mask' in results:
                     mask = Image.fromarray(results['human_mask'][i])
 
@@ -261,5 +261,4 @@ class RandAugment:
                         results['human_mask'][i] = np.array(op(mask, val, flip_sign, fillcolor=0))
                 else:
                     results['imgs'][i] = np.array(op(img, val))
-        results['randAug'] = True
         return results
