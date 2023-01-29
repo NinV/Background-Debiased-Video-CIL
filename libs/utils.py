@@ -49,11 +49,12 @@ def print_mean_accuracy(accuracies: List[AverageMeter], num_classes_per_task, fl
 
 
 def build_lr_scheduler(optimizer, config: mmcvConfig):
-    from torch.optim.lr_scheduler import MultiStepLR, StepLR, LinearLR, ExponentialLR
+    from torch.optim.lr_scheduler import MultiStepLR, StepLR, LinearLR, ExponentialLR, CosineAnnealingLR
     scheduler_types = {'StepLR': StepLR,
                        'MultiStepLR': MultiStepLR,
                        'LinearLR': LinearLR,
-                       'ExponentialLR': ExponentialLR}
+                       'ExponentialLR': ExponentialLR,
+                       'CosineAnnealingLR': CosineAnnealingLR}
     constructor = scheduler_types[config.type]
     lr_scheduler = constructor(optimizer, **config['params'])
     return lr_scheduler
