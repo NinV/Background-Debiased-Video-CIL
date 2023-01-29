@@ -41,6 +41,7 @@ class ActorCutMixDataset(RawframeDataset):
                  ann_file,
                  det_file,
                  rand_aug_prop=0.5,
+                 acm_prob=0.5,
                  with_randAug=True,
                  data_prefix=None,
                  test_mode=False,
@@ -80,6 +81,7 @@ class ActorCutMixDataset(RawframeDataset):
 
         self.with_randAug = with_randAug
         self.rand_aug_prop = rand_aug_prop
+        self.prob = acm_prob
         self.randAug_pipeline = self.pipeline
 
         self.no_randAug_pipeline = Compose([
