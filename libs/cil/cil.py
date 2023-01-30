@@ -598,9 +598,6 @@ class BaseCIL(pl.LightningModule):
             cnn_accuracies.update(acc.item() * 100, num_samples)
             start += num_samples
 
-        print('Task {} Accuracies (CNN): {}\nAvg Accuracy (CNN): {}'.format(self.current_task,
-                                                                            cnn_accuracies.values,
-                                                                            cnn_accuracies.avg))
         if self.current_best < cnn_accuracies.avg:
             print("Accuracy improve from {} to {}".format(self.current_best, cnn_accuracies.avg))
             self.current_best = cnn_accuracies.avg
@@ -721,7 +718,7 @@ class CILTrainer:
     def train_task(self):
         self.training_phase = 'inc_step'
         if self.config.save_best and self.current_task==0:
-            val_dataloader = self.data_module.get_val_dataloader(self.current_task)
+            val_dataloader = self.data_module.get_val_dataloader([0, self.current_task])
             self.current_best = 0  # reset for every task
         else:
             val_dataloader = None
@@ -746,7 +743,7 @@ class CILTrainer:
         self.training_phase = 'cbf_step'
         print('Class Balance Fine-tuning. Freeze backbone: {}'.format(not self.config.cbf_train_backbone))
         if self.config.save_best:
-            val_dataloader = self.data_module.get_val_dataloader(self.current_task)
+            val_dataloader = self.data_module.get_val_dataloader([0, self.current_task])
             self.current_best = 0   # reset for every task
         else:
             val_dataloader = None
