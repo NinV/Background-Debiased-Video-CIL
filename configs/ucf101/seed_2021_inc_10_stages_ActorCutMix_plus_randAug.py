@@ -156,10 +156,11 @@ features_extraction_pipeline = [
 
 train_dataset_type = 'ActorCutMixDataset'
 test_dataset_type = 'RawframeDataset'
+det_file = os.path.join(data_dir, "detections.npy")
 data = dict(
     train=dict(
         type=train_dataset_type,
-        det_file=os.path.join(data_dir, "detections.npy"),
+        det_file=det_file,
         ann_file='',                    # need to update this value before using
         data_prefix=data_root,
         rand_aug_prop=randAug_prob,

@@ -21,7 +21,7 @@ from mmaction.models import build_model
 from ..module_hooks import OutputHook
 from .memory_selection import Herding
 from ..utils import print_mean_accuracy, build_lr_scheduler, AverageMeter
-from ..loader.comix_loader import BackgroundMixDataset
+from ..loader import BackgroundMixDataset, ActorCutMixDataset
 
 
 class CILDataModule(pl.LightningDataModule):
@@ -376,15 +376,19 @@ class CILDataModule(pl.LightningDataModule):
             source = self._merge_dataset(source, targets)
         return source
 
-    @staticmethod
-    def _merge_dataset(source: RawframeDataset, target_: Union[RawframeDataset, List[RawframeDataset]]):
-        if type(source) != type(target_):
-            raise ValueError('source and target must be the same type ')
+    # @staticmethod
+    def _merge_dataset(self, source: RawframeDataset, target_: Union[RawframeDataset, List[RawframeDataset]]):
+        # if type(source) != type(target_):
+        #     raise ValueError('source and target must be the same type ')
 
         if isinstance(source, BackgroundMixDataset):
             source.video_infos.extend(target_.video_infos)
             if source.merge_bg_files:
                 source.bg_files.extend(target_.bg_files)
+        elif isinstance(source, ActorCutMixDataset):
+            source.video_infos.extend(target_.video_infos)
+            source.load_detections(self.config.det_file)
+
         elif isinstance(source, RawframeDataset):
             source.video_infos.extend(target_.video_infos)
         else:
