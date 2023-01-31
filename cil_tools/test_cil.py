@@ -16,6 +16,7 @@ def parse_args():
     # other configs
     parser.add_argument('--testing_videos_per_gpu', type=int)
     parser.add_argument('--testing_workers_per_gpu', type=int)
+    parser.add_argument('--save_best', action='store_true', help='this flag do nothing')
     args = parser.parse_args()
 
     # cfg_dict are used for updating the configurations from config file

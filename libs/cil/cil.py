@@ -253,6 +253,9 @@ class CILDataModule(pl.LightningDataModule):
                           persistent_workers=True
                           )
 
+    # def val_dataloader(self):
+    #     return self.get_val_dataloader(self.current_task)
+
     def features_extraction_dataloader_on_train_dataset(self, task_idx: int):
         """
         extracting features for memory selection
@@ -476,6 +479,14 @@ class BaseCIL(pl.LightningModule):
     def training_phase(self):
         return self.controller.training_phase
 
+    @property
+    def current_best(self):
+        return self.controller.current_best
+
+    @current_best.setter
+    def current_best(self, value):
+        self.controller.current_best = value
+
     # others
     def _extract_repr(self):
         # https://mmaction2.readthedocs.io/en/latest/_modules/mmaction/models/heads/tsm_head.html#TSMHead
@@ -556,10 +567,45 @@ class BaseCIL(pl.LightningModule):
                     result[k] = v
         return result
 
-    # def on_train_epoch_end(self) -> None:
-    #     if self.current_epoch >= 30 and (self.current_epoch + 1) % 2 == 0:
-    #         self.trainer.save_checkpoint(self.controller.ckpt_dir / 'task_{}_epoch_{}.pt'.format(self.controller.current_task,
-    #                                                                                              self.current_epoch))
+    def validation_step(self, batch_data, batch_idx):
+        x = batch_data['imgs']
+        cls_score = self.current_model(x, return_loss=False)
+        result = {'cls_score': cls_score,
+                  'label': batch_data['label']
+                  }
+        return result
+
+    def validation_epoch_end(self, validation_step_outputs):
+        # collate data
+        cls_score = []
+        labels = []
+        for batch_data in validation_step_outputs:
+            cls_score.extend(batch_data['cls_score'])
+            labels.extend(batch_data['label'])
+        cls_score = torch.stack(cls_score, dim=0)
+        labels = torch.stack(labels, dim=0)
+        preds = torch.argmax(cls_score, dim=1, keepdim=False)
+
+        metric = torchmetrics.classification.Accuracy(num_classes=self.num_classes(self.current_task), multiclass=True)
+        metric.to(cls_score.device)
+        cnn_accuracies = AverageMeter()
+        ds_list = self.controller.data_module.val_datasets
+
+        start = 0
+        for task_idx in range(self.current_task + 1):
+            num_samples = len(ds_list[task_idx])
+            acc = metric(preds[start: start + num_samples], labels[start: start + num_samples])  # no shuffle
+            cnn_accuracies.update(acc.item() * 100, num_samples)
+            start += num_samples
+
+        if self.current_best < cnn_accuracies.avg:
+            print("Accuracy improve from {} to {}".format(self.current_best, cnn_accuracies.avg))
+            self.current_best = cnn_accuracies.avg
+            # saving model weights
+            save_weight_destination = self.controller.ckpt_dir / 'ckpt_task_{}.pt'.format(self.current_task)
+            torch.save(self.current_model.state_dict(), save_weight_destination)
+            print('save_model at:', str(save_weight_destination))
+        return cnn_accuracies
 
 
 class CILTrainer:
@@ -649,6 +695,11 @@ class CILTrainer:
         self.logger = WandbLogger(project='CILVideo')
         self.training_phase = None      # ['inc_step', 'cbf_step']
 
+        if config.save_best:
+            self.current_best = 0
+        else:
+            self.current_best = None
+
     @property
     def current_task(self):
         return self._current_task
@@ -666,6 +717,12 @@ class CILTrainer:
 
     def train_task(self):
         self.training_phase = 'inc_step'
+        if self.config.save_best and self.current_task==0:
+            val_dataloader = self.data_module.get_val_dataloader([0, self.current_task])
+            self.current_best = 0  # reset for every task
+        else:
+            val_dataloader = None
+
         gradient_clip_val = None if self._current_task == 0 else 1.0
         trainer = pl.Trainer(gpus=self.config.gpu_ids,
                              default_root_dir=self.config.work_dir,
@@ -677,13 +734,20 @@ class CILTrainer:
                              gradient_clip_val=gradient_clip_val,
                              strategy=self.strategy,
                              logger=self.logger,
-                             log_every_n_steps=self.config.log_every_n_steps
+                             log_every_n_steps=self.config.log_every_n_steps,
+                             num_sanity_val_steps=0,
                              )
-        trainer.fit(self.cil_model, self.data_module)
+        trainer.fit(self.cil_model, self.data_module.train_dataloader(), val_dataloaders=val_dataloader)
 
     def train_cbf(self):
         self.training_phase = 'cbf_step'
         print('Class Balance Fine-tuning. Freeze backbone: {}'.format(not self.config.cbf_train_backbone))
+        if self.config.save_best:
+            val_dataloader = self.data_module.get_val_dataloader([0, self.current_task])
+            self.current_best = 0   # reset for every task
+        else:
+            val_dataloader = None
+
         cbf_dataset = self.data_module.build_cbf_dataset()
         loader = DataLoader(cbf_dataset,
                             batch_size=self.config.videos_per_gpu,
@@ -701,14 +765,15 @@ class CILTrainer:
                              enable_checkpointing=False,
                              strategy=self.strategy,
                              logger=self.logger,
-                             log_every_n_steps=self.config.log_every_n_steps
+                             log_every_n_steps=self.config.log_every_n_steps,
+                             num_sanity_val_steps=0
                              )
         self.cil_model.optimizer_mode = 'cbf'
         if self.config.cbf_train_backbone:
-            trainer.fit(self.cil_model, loader)
+            trainer.fit(self.cil_model, loader, val_dataloaders=val_dataloader)
         else:
             self.cil_model.current_model.freeze_backbone()
-            trainer.fit(self.cil_model, loader)
+            trainer.fit(self.cil_model, loader, val_dataloaders=val_dataloader)
             self.cil_model.current_model.unfreeze_backbone()
         self.cil_model.optimizer_mode = 'default'
 
@@ -720,6 +785,12 @@ class CILTrainer:
             self.print_task_info()
             print('Start training for task {}'.format(self.current_task))
             self.train_task()
+
+            if self.config.save_best and self._current_task == 0:
+                print("Load from best ckpt")
+                self.cil_model.current_model.load_state_dict(
+                    torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)))
+
 
             # manage exemplar (for updating nme classifier and class balance finetuning)
             print('Create exemplar')
@@ -737,13 +808,18 @@ class CILTrainer:
             if self._current_task > 0 and self.config.use_cbf:
                 self.train_cbf()
 
-            exemplar_class_means = self._get_exemplar_class_means(self.current_task, override_class_mean_ckpt=True)
-
             # saving model weights
-            save_weight_destination = self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)
-            torch.save(self.cil_model.current_model.state_dict(), save_weight_destination)
-            print('save_model at:', str(save_weight_destination))
+            if self.config.save_best:
+                print("Load from best ckpt")
+                self.cil_model.current_model.load_state_dict(
+                    torch.load(self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)))
+            else:
+                print("Save last ckpt")
+                save_weight_destination = self.ckpt_dir / 'ckpt_task_{}.pt'.format(self._current_task)
+                torch.save(self.cil_model.current_model.state_dict(), save_weight_destination)
+                print('save_model at:', str(save_weight_destination))
 
+            exemplar_class_means = self._get_exemplar_class_means(self.current_task, override_class_mean_ckpt=True)
             # testing
             self._testing(val_test='val', exemplar_class_means=exemplar_class_means,
                           task_indices=[0, self._current_task])
