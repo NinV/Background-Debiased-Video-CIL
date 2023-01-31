@@ -148,21 +148,25 @@ class CILDataModule(pl.LightningDataModule):
         if isinstance(dataset, BackgroundMixDataset):
             dataset.bg_files = []
 
-        if self.config.keep_all_backgrounds:
-            dataset = self.merge_dataset(dataset, self.exemplar_datasets)
-            dataset.bg_files = list(self._all_bg_files)
+            if self.config.keep_all_backgrounds:
+                dataset = self.merge_dataset(dataset, self.exemplar_datasets)
+                dataset.bg_files = list(self._all_bg_files)
 
-        elif self.config.cbf_full_bg:
-            dataset = self.merge_dataset(dataset, self.exemplar_datasets)
-            all_bg_files_ = set(self.train_dataset.bg_files) | set(dataset.bg_files)
-            dataset.bg_files = list(all_bg_files_)
+            elif self.config.cbf_full_bg:
+                dataset = self.merge_dataset(dataset, self.exemplar_datasets)
+                all_bg_files_ = set(self.train_dataset.bg_files) | set(dataset.bg_files)
+                dataset.bg_files = list(all_bg_files_)
 
         elif isinstance(dataset, RawframeDataset):
             dataset = self.merge_dataset(dataset, self.exemplar_datasets)
 
         else:
             raise NotImplementedError
-        print('CBF dataset built ({} videos, {} background)'.format(len(dataset), len(dataset.bg_files)))
+
+        if isinstance(dataset, BackgroundMixDataset):
+            print('CBF dataset built ({} videos, {} background)'.format(len(dataset), len(dataset.bg_files)))
+        else:
+            print('CBF dataset built ({} videos)'.format(len(dataset)))
         return dataset
 
     def reload_train_dataset(self,
