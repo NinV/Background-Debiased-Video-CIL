@@ -12,31 +12,11 @@ from mmaction.datasets.builder import DATASETS
 
 @DATASETS.register_module()
 class ActorCutMixDataset(RawframeDataset):
-    """Rawframe dataset for action recognition.
-       Unlabeled: return strong/weak augmented pair
-       Only valid in training time, not test-time behavior
-
+    """
     Args:
         ann_file (str): Path to the annotation file.
-        pipeline_weak (list[dict | callable]): A sequence of data transforms (shared augmentation).
-        pipeline_strong (list[dict | callable]): A sequence of data transforms (strong augmentation).
-        pipeline_format (list[dict | callable]): A sequence of data transforms (post-processing, for formating).
-        data_prefix (str): Path to a directory where videos are held.
-            Default: None.
-        test_mode (bool): Store True when building test or validation dataset.
-            Default: False.
-        filename_tmpl (str): Template for each filename.
-            Default: 'img_{:05}.jpg'.
-        with_offset (bool): Determines whether the offset information is in
-            ann_file. Default: False.
-        multi_class (bool): Determines whether it is a multi-class
-            recognition dataset. Default: False.
-        num_classes (int): Number of classes in the dataset. Default: None.
-        modality (str): Modality of data. Support 'RGB' only.
         det_file (str): Path to the human box detection result file.
-        cls_file (str): Path to the ImageNet classification result file.
     """
-
     def __init__(self,
                  ann_file,
                  det_file,
