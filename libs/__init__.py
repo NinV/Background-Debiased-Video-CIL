@@ -8,7 +8,7 @@ from .module_hooks import *
 __all__ = ['CILRecognizer2D', 'CILTSMOptimizerConstructorImprovised', 'CILRecognizer2D', 'LSC',
            'RandAugment', 'FiveCrop',
            'BackgroundMixDataset', 'ActorCutMixDataset',
-           'LSCLoss',
+           'LSCLoss', 'ACMSmoothCE',
            'CILTrainer', 'CILDataModule', 'BaseCIL', 'Herding',
            'OutputHook'
 ]

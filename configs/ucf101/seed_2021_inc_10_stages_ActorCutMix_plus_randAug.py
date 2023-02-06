@@ -59,7 +59,7 @@ model = dict(
                              out_features=starting_num_classes,
                              nb_proxies=1),
         num_segments=8,
-        loss_cls=dict(type='LSCLoss'),
+        loss_cls=dict(type='ACMSmoothCE', alpha=4),
         spatial_type='avg',
         consensus=dict(type='AvgConsensus', dim=1),
         dropout_ratio=0.5,
@@ -164,7 +164,6 @@ data = dict(
         ann_file='',                    # need to update this value before using
         data_prefix=data_root,
         rand_aug_prop=randAug_prob,
-        with_randAug=True
     ),
     val=dict(
         type=test_dataset_type,

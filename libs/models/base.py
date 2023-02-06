@@ -7,6 +7,16 @@ import random
 
 @RECOGNIZERS.register_module()
 class CILRecognizer2D(Recognizer2D):
+    def forward_train(self, imgs, labels, **kwargs):
+        """
+        Args:
+            **kwargs: kwargs for loss function
+        Returns:
+        """
+        return super().forward_train(imgs, labels,
+                                     num_classes=self.cls_head.num_classes,   # actorCutMix require num_classes
+                                     **kwargs)
+
     def forward_test(self, imgs):
         """Defines the computation performed at every call when evaluation and
         testing."""

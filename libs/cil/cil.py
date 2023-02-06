@@ -511,7 +511,7 @@ class BaseCIL(pl.LightningModule):
         previous_task_num_classes = self.num_classes(self.current_task - 1)
         # x.shape = (batch_size, channels, T, H, W)
         imgs, labels = batch_data['imgs'], batch_data['label']
-        losses = self.current_model(imgs, labels)  # losses = {'loss_cls': loss_cls}
+        losses = self.current_model(imgs, labels, batch_data=batch_data)  # losses = {'loss_cls': loss_cls}
         if self.use_kd and self.current_task > 0:
             total_kd_loss = 0
             kd_criterion = nn.MSELoss()
