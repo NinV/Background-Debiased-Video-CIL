@@ -1,10 +1,8 @@
 import argparse
 from mmcv import Config
-import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
 
-from libs.cil.cil import BaseCIL, CILDataModule, CILTrainer
-import libs
+# from libs.cil.cil import CILTrainer
+from libs.cil import CILTrainer
 
 
 def parse_args():

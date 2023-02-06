@@ -8,7 +8,8 @@ from mmaction.models.heads.tsm_head import TSMHead
 from mmaction.models.builder import HEADS
 
 from .inc_net import IncrementalNet, CosineIncrementalNet
-from .cosine_linear import LSC, LSCLoss
+from .cosine_linear import LSC
+from ...losses import LSCLoss
 
 
 inc_linear_layers = {
