@@ -109,12 +109,16 @@ class ActorCutMixDataset(RawframeDataset):
     def prepare_train_frames(self, idx):
         result = super().prepare_train_frames(idx)
         result['bg_idx'] = -1
+
+        # set default value for ['foreground_ratio', 'background_label'] values
+        result['foreground_ratio'] = 1.0
+        result['background_label'] = -1
         if result['randAug']:
-            result['foreground_ratio'] = 1.0
-            result['background_label'] = -1
-        else:
-            if random.random() < self.acm_prob:
-                result = self.actor_cut_mix(result)
+            result = self.out_pipeline(result)
+            return result
+
+        if random.random() < self.acm_prob:
+            result = self.actor_cut_mix(result)     # will modify ['foreground_ratio', 'background_label'] values
         result = self.out_pipeline(result)
         return result
 
