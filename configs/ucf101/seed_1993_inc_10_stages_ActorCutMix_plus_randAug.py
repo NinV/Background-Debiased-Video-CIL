@@ -164,6 +164,7 @@ data = dict(
         ann_file='',                    # need to update this value before using
         data_prefix=data_root,
         rand_aug_prop=randAug_prob,
+        acm_prob=1,
     ),
     val=dict(
         type=test_dataset_type,

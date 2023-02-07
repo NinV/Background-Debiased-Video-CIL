@@ -17,7 +17,7 @@ class ActorCutMixDataset(RawframeDataset):
                  ann_file,
                  det_file,
                  rand_aug_prop=0.5,
-                 acm_prob=0.5,
+                 acm_prob=1,
                  data_prefix=None,
                  test_mode=False,
                  filename_tmpl='img_{:05}.jpg',
@@ -55,7 +55,7 @@ class ActorCutMixDataset(RawframeDataset):
             self.load_detections(det_file)
 
         self.rand_aug_prop = rand_aug_prop
-        self.prob = acm_prob
+        self.acm_prob = acm_prob
         self.randAug_pipeline = self.pipeline
 
         self.decode_pipeline = Compose([
@@ -113,9 +113,9 @@ class ActorCutMixDataset(RawframeDataset):
             result['foreground_ratio'] = 1.0
             result['background_label'] = -1
         else:
-            result = self.actor_cut_mix(result)
+            if random.random() < self.acm_prob:
+                result = self.actor_cut_mix(result)
         result = self.out_pipeline(result)
-        # print("Action label: {}, Background label: {}".format(result['label'], result['background_label']))
         return result
 
     def actor_cut_mix(self, result):
