@@ -261,6 +261,11 @@ class CILTSMOptimizerConstructorImprovised(DefaultOptimizerConstructor):
                 if m.learnable_eta:
                     lr5_weight.append(eta)
 
+            elif isinstance(m, IncrementalNet):
+                m_params = list(m.parameters())
+                lr5_weight.append(m_params[0])
+                lr10_bias.append(m_params[1])
+
             elif len(m._modules) == 0:
                 if len(list(m.parameters())) > 0:
                     raise ValueError(f'New atomic module type: {type(m)}. '

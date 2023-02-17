@@ -20,6 +20,7 @@ from mmaction.models import build_model
 
 from ..module_hooks import OutputHook
 from .memory_selection import Herding
+from .icarl import ICARLModel
 from ..utils import print_mean_accuracy, build_lr_scheduler, AverageMeter
 from ..loader import BackgroundMixDataset, ActorCutMixDataset
 
@@ -633,7 +634,12 @@ class CILTrainer:
         # setup data module
         self.data_module = CILDataModule(config)
         self.data_module.controller = self
-        self.cil_model = BaseCIL(config)
+        if config.methods == 'base':
+            self.cil_model = BaseCIL(config)
+        elif config.methods == 'icarl':
+            self.cil_model = ICARLModel(config)
+        else:
+            raise ValueError
         self.cil_model.controller = self
 
         self.ckpt_dir = self.work_dir / 'ckpt'
