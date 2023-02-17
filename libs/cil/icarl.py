@@ -105,8 +105,11 @@ class ICARLModel(pl.LightningModule):
                     prev_model_targets = self.prev_model(imgs[indices], return_loss=False)
                 targets[indices] = prev_model_targets
 
-        criterion = nn.BCEWithLogitsLoss()
-        loss = criterion(cls_score, targets)
+        # self.criterion = nn.BCEWithLogitsLoss()   # original ICaRL use BCE
+        # new implementation or ICaRL use CrossEntropy
+        cls_score = F.log_softmax(cls_score, dim=1)
+        loss = torch.sum(targets * F.log_softmax(cls_score, dim=1), dim=1)
+        loss = -torch.mean(loss, dim=0)
 
         batch_size = imgs.shape[0]
         self.log('[{}_Task_{}]{}'.format(self.training_phase, self.current_task, 'loss_cls'),
