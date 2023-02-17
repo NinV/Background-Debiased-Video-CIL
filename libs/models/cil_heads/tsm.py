@@ -7,13 +7,12 @@ from mmcv.utils import SyncBatchNorm, _BatchNorm, _ConvNd
 from mmaction.models.heads.tsm_head import TSMHead
 from mmaction.models.builder import HEADS
 
-from .inc_net import IncrementalNet, CosineIncrementalNet
+from .inc_net import IncrementalNet
 from .cosine_linear import LSC
 from ...losses import LSCLoss
 
 
 inc_linear_layers = {
-    'CosineLinear': CosineIncrementalNet,
     'SimpleLinear': IncrementalNet,
     'LocalSimilarityClassifier': LSC
 }
