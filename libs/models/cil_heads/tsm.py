@@ -293,6 +293,11 @@ class CILTSMOptimizerConstructorImprovised(DefaultOptimizerConstructor):
         params.append({'params': bn, 'lr': self.base_lr, 'weight_decay': 0})
         params.append({
             'params': lr5_weight,
-            'lr': self.base_lr * fc_lr_scale_factor,
+            'lr': self.base_lr * fc_lr_scale_factor,    # default value fc_lr_scale_factor=5
             'weight_decay': self.base_wd
+        })
+        params.append({
+            'params': lr10_bias,
+            'lr': self.base_lr * fc_lr_scale_factor * 2,
+            'weight_decay': 0
         })
