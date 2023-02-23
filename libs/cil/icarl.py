@@ -31,10 +31,12 @@ class ICARLModel(pl.LightningModule):
         self.max_epochs = self.num_tasks * self.num_epoch_per_task
 
         self.current_model = build_model(config.model)  # current model
+        self.current_model.test_cfg['average_clips'] = 'score'   # to avoid applying softmax to cls_score
 
         if is_train:
             self.prev_model = build_model(config.model)
             self.prev_model.eval()
+            self.prev_model.test_cfg['average_clips'] = 'score'  # to avoid applying softmax to cls_score
         else:
             self.prev_model = None
 
@@ -103,13 +105,13 @@ class ICARLModel(pl.LightningModule):
             if indices.nelement():
                 with torch.no_grad():
                     prev_model_targets = self.prev_model(imgs[indices], return_loss=False)
+                    prev_model_targets = F.softmax(prev_model_targets,dim=1)
                 targets[indices] = prev_model_targets
 
         # self.criterion = nn.BCEWithLogitsLoss()   # original ICaRL use BCE
         # new implementation or ICaRL use CrossEntropy
-        cls_score = F.log_softmax(cls_score, dim=1)
-        loss = torch.sum(targets * F.log_softmax(cls_score, dim=1), dim=1)
-        loss = -torch.mean(loss, dim=0)
+        loss = -torch.sum(targets * F.log_softmax(cls_score, dim=1), dim=1)
+        loss = torch.mean(loss, dim=0)
 
         batch_size = imgs.shape[0]
         self.log('[{}_Task_{}]{}'.format(self.training_phase, self.current_task, 'loss_cls'),
