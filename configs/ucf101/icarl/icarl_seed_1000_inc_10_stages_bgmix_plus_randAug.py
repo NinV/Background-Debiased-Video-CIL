@@ -226,5 +226,5 @@ data = dict(
         pipeline=train_pipeline),
 )
 
-# keep_all_backgrounds = False
-# cbf_full_bg = False
+keep_all_backgrounds = False
+cbf_full_bg = False
