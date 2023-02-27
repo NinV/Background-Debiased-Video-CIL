@@ -7,13 +7,12 @@ from mmcv.utils import SyncBatchNorm, _BatchNorm, _ConvNd
 from mmaction.models.heads.tsm_head import TSMHead
 from mmaction.models.builder import HEADS
 
-from .inc_net import IncrementalNet, CosineIncrementalNet
+from .inc_net import IncrementalNet
 from .cosine_linear import LSC
 from ...losses import LSCLoss
 
 
 inc_linear_layers = {
-    'CosineLinear': CosineIncrementalNet,
     'SimpleLinear': IncrementalNet,
     'LocalSimilarityClassifier': LSC
 }
@@ -261,6 +260,11 @@ class CILTSMOptimizerConstructorImprovised(DefaultOptimizerConstructor):
                 if m.learnable_eta:
                     lr5_weight.append(eta)
 
+            elif isinstance(m, IncrementalNet):
+                m_params = list(m.parameters())
+                lr5_weight.append(m_params[0])
+                lr10_bias.append(m_params[1])
+
             elif len(m._modules) == 0:
                 if len(list(m.parameters())) > 0:
                     raise ValueError(f'New atomic module type: {type(m)}. '
@@ -289,6 +293,11 @@ class CILTSMOptimizerConstructorImprovised(DefaultOptimizerConstructor):
         params.append({'params': bn, 'lr': self.base_lr, 'weight_decay': 0})
         params.append({
             'params': lr5_weight,
-            'lr': self.base_lr * fc_lr_scale_factor,
+            'lr': self.base_lr * fc_lr_scale_factor,    # default value fc_lr_scale_factor=5
             'weight_decay': self.base_wd
+        })
+        params.append({
+            'params': lr10_bias,
+            'lr': self.base_lr * fc_lr_scale_factor * 2,
+            'weight_decay': 0
         })
