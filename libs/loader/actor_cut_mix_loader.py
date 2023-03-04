@@ -1,6 +1,7 @@
 import random
 import copy
 import numpy as np
+import torch
 import torch.nn.functional as F
 from mmaction.datasets.pipelines import Compose
 from mmaction.datasets import RawframeDataset
@@ -48,10 +49,6 @@ class ActorCutMixDataset(RawframeDataset):
                 max_wh_scale_gap=1,
                 num_fixed_crops=13),
             dict(type='Resize', scale=(224, 224), keep_ratio=False),
-            dict(type='Normalize', **img_norm_cfg),
-            dict(type='FormatShape', input_format='NCHW'),
-            dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
-            dict(type='ToTensor', keys=['imgs', 'label'])
         ]
         super().__init__(ann_file,
                          randAug_pipeline_configs,
@@ -83,10 +80,6 @@ class ActorCutMixDataset(RawframeDataset):
             dict(type='FlipWithBox', flip_ratio=0.5),
             dict(type='ResizeWithBox', scale=(224, 224), keep_ratio=False),
             dict(type='ActorCutOut', fill_color=127),  # remove actor from video
-            # dict(type='Normalize', **img_norm_cfg),
-            # dict(type='FormatShape', input_format='NCHW'),
-            # dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
-            # dict(type='ToTensor', keys=['imgs', 'label'])
         ])
 
         # pipeline for generating action video
@@ -102,7 +95,7 @@ class ActorCutMixDataset(RawframeDataset):
             dict(type='SceneCutOut', fill_color=127),  # remove scene from video
         ])
 
-        self.acm_out_pipeline = Compose([
+        self.out_pipeline = Compose([
             dict(type='Normalize', **img_norm_cfg),
             dict(type='FormatShape', input_format='NCHW'),
             dict(type='Collect', keys=['imgs', 'label', 'foreground_ratio', 'background_label'], meta_keys=[]),
@@ -127,6 +120,9 @@ class ActorCutMixDataset(RawframeDataset):
             results = self.actor_cut_mix(results)
         else:
             results = self.randAug_pipeline(results)
+            results['foreground_ratio'] = 1
+            results['background_label'] = -1
+        results = self.out_pipeline(results)
         return results
 
     def _prepare_frames(self, idx):
@@ -153,7 +149,7 @@ class ActorCutMixDataset(RawframeDataset):
         # foreground_ratio = self._calc_foreground_ratio(result)
         result['foreground_ratio'] = self._calc_foreground_ratio(result)
         result['background_label'] = scene_video['label']
-        return self.acm_out_pipeline(result)
+        return result
 
     @staticmethod
     def _calc_foreground_ratio(result):
