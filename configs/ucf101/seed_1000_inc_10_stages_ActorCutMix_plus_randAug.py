@@ -28,7 +28,7 @@ task_splits = [
 
 
 # select one of ['base', 'oracle', 'finetune']
-methods = 'base'
+methods = 'icarl'
 starting_task = 0
 ending_task = 10
 use_nme_classifier = False
@@ -55,9 +55,8 @@ model = dict(
         type='IncrementalTSMHead',
         num_classes=starting_num_classes,
         in_channels=512,
-        inc_head_config=dict(type='LocalSimilarityClassifier',
-                             out_features=starting_num_classes,
-                             nb_proxies=1),
+        inc_head_config=dict(type='SimpleLinear',
+                             out_features=starting_num_classes),
         num_segments=8,
         loss_cls=dict(type='ACMSmoothCE', alpha=4),
         spatial_type='avg',
@@ -163,8 +162,7 @@ data = dict(
         det_file=det_file,
         ann_file='',                    # need to update this value before using
         data_prefix=data_root,
-        rand_aug_prop=randAug_prob,
-        acm_prob=1,
+        acm_prob=0.5,
     ),
     val=dict(
         type=test_dataset_type,
