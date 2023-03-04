@@ -103,11 +103,12 @@ class ICARLModel(pl.LightningModule):
         if 'foreground_ratio' in batch_data:
             background_labels = torch.squeeze(batch_data['background_label'], dim=1)
             background_labels[background_labels == -1] = 0
-            background_labels = F.one_hot(background_labels, self.num_classes(self.current_task))
+            background_labels = F.one_hot(background_labels, self.num_classes(self.current_task)).float()
             foreground_ratio = batch_data['foreground_ratio']
             lambda_ = 1 - (1 - foreground_ratio) ** 4
             lambda_ = lambda_.view(lambda_.size(0), 1)
             targets = targets * lambda_ + (1 - lambda_) * background_labels
+            targets = targets.float()
 
         if self.current_task > 0:
             previous_task_num_classes = self.num_classes(self.current_task - 1)
