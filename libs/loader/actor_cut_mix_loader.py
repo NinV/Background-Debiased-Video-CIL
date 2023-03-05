@@ -1,6 +1,8 @@
 import random
+import copy
 import numpy as np
-
+import torch
+import torch.nn.functional as F
 from mmaction.datasets.pipelines import Compose
 from mmaction.datasets import RawframeDataset
 from mmaction.datasets.builder import DATASETS
@@ -16,7 +18,8 @@ class ActorCutMixDataset(RawframeDataset):
     def __init__(self,
                  ann_file,
                  det_file,
-                 rand_aug_prop=0.5,
+                 # randaug_pipeline,
+                 # acm_pipeline,
                  acm_prob=1,
                  data_prefix=None,
                  test_mode=False,
@@ -31,10 +34,21 @@ class ActorCutMixDataset(RawframeDataset):
                  dynamic_length=False,
                  **kwargs):
 
+        img_norm_cfg = dict(
+            mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_bgr=False)
         randAug_pipeline_configs = [
             dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8),
             dict(type='RawFrameDecode'),
-            dict(type='RandAugment', n=2, m=10, prob=rand_aug_prop),
+            dict(type='Resize', scale=(-1, 256)),
+            dict(type='RandAugment', n=2, m=10, prob=1),
+            dict(
+                type='MultiScaleCrop',
+                input_size=224,
+                scales=(1, 0.875, 0.75, 0.66),
+                random_crop=False,
+                max_wh_scale_gap=1,
+                num_fixed_crops=13),
+            dict(type='Resize', scale=(224, 224), keep_ratio=False),
         ]
         super().__init__(ann_file,
                          randAug_pipeline_configs,
@@ -49,49 +63,43 @@ class ActorCutMixDataset(RawframeDataset):
                          sample_by_class,
                          power,
                          dynamic_length, **kwargs)
+        self.randAug_pipeline = self.pipeline
 
         # Load human detection bbox
         if det_file is not None:
             self.load_detections(det_file)
-
-        self.rand_aug_prop = rand_aug_prop
         self.acm_prob = acm_prob
-        self.randAug_pipeline = self.pipeline
-
-        self.decode_pipeline = Compose([
-            dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8),
-            dict(type='RawFrameDecode'),
-        ])
-
-        img_norm_cfg = dict(
-            mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_bgr=False)
-        self.out_pipeline = Compose([
-            dict(type='Resize', scale=(224, 224), keep_ratio=False),
-            dict(type='Normalize', **img_norm_cfg),
-            dict(type='FormatShape', input_format='NCHW'),
-            dict(type='Collect', keys=['imgs', 'label', 'foreground_ratio', 'background_label'], meta_keys=[]),
-            dict(type='ToTensor', keys=['imgs', 'label', 'foreground_ratio', 'background_label'])
-        ])
 
         # pipeline for generating scene video
         self.scene_pipeline = Compose([
+            dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8),
+            dict(type='RawFrameDecode'),
             dict(type='DetectionLoad', thres=0.4),
             dict(type='ResizeWithBox', scale=(-1, 256)),
             # dict(type='RandomResizedCropWithBox'),    # too extreme
             dict(type='FlipWithBox', flip_ratio=0.5),
             dict(type='ResizeWithBox', scale=(224, 224), keep_ratio=False),
-            dict(type='ActorCutOut', fill_color=127)  # remove actor from video
+            dict(type='ActorCutOut', fill_color=127),  # remove actor from video
         ])
 
         # pipeline for generating action video
         self.action_pipeline = Compose([
+            dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8),
+            dict(type='RawFrameDecode'),
             dict(type='DetectionLoad', thres=0.4),
             dict(type='ResizeWithBox', scale=(-1, 256)),
             # dict(type='RandomResizedCropWithBox'),
             dict(type='FlipWithBox', flip_ratio=0.5),
             dict(type='ResizeWithBox', scale=(224, 224), keep_ratio=False),
             dict(type='BuildHumanMask'),
-            dict(type='SceneCutOut', fill_color=127)  # remove scene from video
+            dict(type='SceneCutOut', fill_color=127),  # remove scene from video
+        ])
+
+        self.out_pipeline = Compose([
+            dict(type='Normalize', **img_norm_cfg),
+            dict(type='FormatShape', input_format='NCHW'),
+            dict(type='Collect', keys=['imgs', 'label', 'foreground_ratio', 'background_label'], meta_keys=[]),
+            dict(type='ToTensor', keys=['imgs', 'label', 'background_label'])
         ])
 
     def load_detections(self, det_file):
@@ -107,51 +115,41 @@ class ActorCutMixDataset(RawframeDataset):
                 self.video_infos[idx]['all_detections'] = dets[seq_name]
 
     def prepare_train_frames(self, idx):
-        result = super().prepare_train_frames(idx)
-        result['bg_idx'] = -1
-
-        # set default value for ['foreground_ratio', 'background_label'] values
-        result['foreground_ratio'] = 1.0
-        result['background_label'] = -1
-        if result['randAug']:
-            result = self.out_pipeline(result)
-            return result
-
+        results = self._prepare_frames(idx)
         if random.random() < self.acm_prob:
-            result = self.actor_cut_mix(result)     # will modify ['foreground_ratio', 'background_label'] values
-        result = self.out_pipeline(result)
-        return result
+            results = self.actor_cut_mix(results)
+        else:
+            results = self.randAug_pipeline(results)
+            results['foreground_ratio'] = 1
+            results['background_label'] = -1
+        results = self.out_pipeline(results)
+        return results
+
+    def _prepare_frames(self, idx):
+        results = copy.deepcopy(self.video_infos[idx])
+        results['filename_tmpl'] = self.filename_tmpl
+        results['modality'] = self.modality
+        results['start_index'] = self.start_index
+        return results
 
     def actor_cut_mix(self, result):
         result = self.action_pipeline(result)
 
         # random sample a video from database to extract background
         scene_video_index = random.randrange(len(self.video_infos))
-        self.pipeline = self.decode_pipeline
-        scene_video = super().prepare_train_frames(scene_video_index)
-        self.pipeline = self.randAug_pipeline
+        scene_video = self._prepare_frames(scene_video_index)
         scene_video = self.scene_pipeline(scene_video)
 
         for frame_idx in range(len(result['imgs'])):
             actor_img = result['imgs'][frame_idx]
             scene_img = scene_video['imgs'][frame_idx]
             actor_mask = result['human_mask'][frame_idx]
-            actor_cut_mix = actor_img.astype(float) * actor_mask + scene_img.astype(float) * (1 - actor_mask)
-
-            # visualization
-            # h, w = actor_img.shape[:2]
-            # acm = np.zeros((h, w * 3 + 20*2, 3), dtype=actor_img.dtype)
-            # acm[:h, :w] = actor_img
-            # acm[:h, w+20:2*w+20] = scene_img
-            # acm[:h, 2*w+40:3*w+40] = actor_cut_mix
-            # cv2.imwrite("acm_{}.png".format(frame_idx), acm)
-
+            actor_cut_mix = actor_img * actor_mask + scene_img * (1 - actor_mask)
             result['imgs'][frame_idx] = actor_cut_mix
-
-        result['bg_idx'] = scene_video_index
+        # foreground_ratio = self._calc_foreground_ratio(result)
+        result['foreground_ratio'] = self._calc_foreground_ratio(result)
         result['background_label'] = scene_video['label']
-
-        return self._calc_foreground_ratio(result)
+        return result
 
     @staticmethod
     def _calc_foreground_ratio(result):
@@ -163,9 +161,7 @@ class ActorCutMixDataset(RawframeDataset):
         for human_mask in result['human_mask']:
             # all human_mask channels are same
             foreground_area += human_mask[:, :, 0].sum()
-
-        result['foreground_ratio'] = foreground_area / total_area
-        return result
+        return foreground_area / total_area
 
     def prepare_test_frames(self, idx):     # do not use this class for testing
         raise NotImplementedError
