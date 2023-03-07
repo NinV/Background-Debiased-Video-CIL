@@ -21,6 +21,7 @@ from mmaction.models import build_model
 from ..module_hooks import OutputHook
 from .memory_selection import Herding
 from .icarl import ICARLModel
+from .icarl_video_mix import ICARLVideoMix
 from ..utils import print_mean_accuracy, build_lr_scheduler, AverageMeter
 from ..loader import BackgroundMixDataset, ActorCutMixDataset
 
@@ -638,6 +639,8 @@ class CILTrainer:
             self.cil_model = BaseCIL(config)
         elif config.methods == 'icarl':
             self.cil_model = ICARLModel(config)
+        elif config.methods == 'icarl_video_mix':
+            self.cil_model = ICARLVideoMix(config)
         else:
             raise ValueError
         self.cil_model.controller = self
