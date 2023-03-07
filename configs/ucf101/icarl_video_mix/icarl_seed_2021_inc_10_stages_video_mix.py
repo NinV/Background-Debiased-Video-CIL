@@ -29,8 +29,9 @@ task_splits = [
 
 # select one of ['base', 'oracle', 'finetune']
 methods = 'icarl_video_mix'
-video_mix_prob = 1.0
+video_mix_prob = 0.5
 video_mix_alpha = 1.0
+randAug_prob = 0.5
 starting_task = 0
 ending_task = 10
 use_cbf = False
@@ -98,6 +99,7 @@ train_pipeline = [
     dict(type='SampleFrames', clip_len=1, frame_interval=1, num_clips=8),
     dict(type='RawFrameDecode'),
     dict(type='Resize', scale=(-1, 256)),
+    dict(type='RandAugment', n=2, m=10, prob=randAug_prob),
     dict(
         type='MultiScaleCrop',
         input_size=224,
