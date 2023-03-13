@@ -80,9 +80,8 @@ class SceneDatasetFromVideo(RawframeDataset):
 
 
 if __name__ == '__main__':
-    args, cfg_dict = parse_args()
+    args = parse_args()
     config = Config.fromfile(args.config)
-    config.merge_from_dict(cfg_dict)
 
     model, classes, output_hooks = get_scene_mode()
     model.to('cuda')
