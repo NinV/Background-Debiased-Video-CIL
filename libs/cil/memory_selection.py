@@ -1,5 +1,7 @@
-from typing import List
+from typing import List, Union, Dict
+import pathlib
 import random
+import json, pickle
 import torch
 import torch.nn.functional as F
 
@@ -37,7 +39,7 @@ class Herding:
         else:
             self.num_exemplars_per_class = budget_size
 
-    def construct_exemplar(self, prediction_with_meta):
+    def construct_exemplar(self, prediction_with_meta, **kwargs):
         self._check_dimension(prediction_with_meta['repr_'], prediction_with_meta['label'])
         meta_by_class = self.split_meta_by_class(prediction_with_meta)
         exemplar_meta = {}
@@ -161,39 +163,60 @@ class Herding:
         return mean, normalized_features
 
 
+class PredefinedMemoryManager:
+    def __init__(self,
+                 exemplar_file: Union[str, pathlib.Path],
+                 task_splits: List[List],
+                 # strategy: str
+                 ):
+        self.exemplar_file = exemplar_file
+        self.task_splits = task_splits
+        # self.strategy = strategy
+
+        self.ori_idx_to_inc_idx = {}
+        for task in self.task_splits:
+            for original_class_idx in task:
+                if original_class_idx not in self.ori_idx_to_inc_idx:
+                    self.ori_idx_to_inc_idx[original_class_idx] = len(self.ori_idx_to_inc_idx)
+
+        with open(exemplar_file, 'rb') as f:
+            exemplars_data_from_file = pickle.load(f)
+
+        self.exemplar_list = [{} for _ in range(len(task_splits))]
+        for task_idx, task in enumerate(task_splits):
+            for original_class_idx in task:
+                inc_class_idx = self.ori_idx_to_inc_idx[original_class_idx]
+
+                # {inc_class_idx: (frame_dir, total_frames)}
+                self.exemplar_list[task_idx][inc_class_idx] = exemplars_data_from_file[original_class_idx]
+
+    def construct_exemplar(self, task_idx, **kwargs):
+        exemplars = self.exemplar_list[task_idx]
+        exemplar_meta = {}
+        for class_idx in exemplars.keys():
+            frame_dir = []
+            total_frames = []
+            exemplar_meta[class_idx] = {'frame_dir': frame_dir, 'total_frames': total_frames}
+            records = exemplars[class_idx]['records']
+            for r in records:
+                frame_dir.append(r['frame_dir'])
+                total_frames.append(r['total_frames'])
+        return exemplar_meta
+
+
 def main():
-    num_classes = 51
-    budget_size = 20
-    dims = 512
-    num_videos = 5000
-    num_clips = 8
-    num_samples = 10        # 10 crops
+    task_splits = [[37, 97, 56, 55, 33, 84, 3, 4, 72, 59, 66, 48, 65, 91, 99, 39, 34, 22, 67, 74, 19, 35, 9, 86, 88, 63,
+                    85, 38, 54, 25, 57, 62, 83, 76, 6, 13, 2, 53, 8, 24, 44, 12, 100, 29, 5, 17, 15, 73, 47, 27, 46],
+                   [98, 96, 18, 90, 75, 31, 95, 49, 43, 78],
+                   [23, 68, 16, 7, 26, 21, 50, 70, 32, 52],
+                   [11, 69, 93, 14, 79, 10, 80, 77, 81, 28],
+                   [82, 30, 20, 41, 58, 42, 60, 36, 40, 45],
+                   [89, 0, 61, 1, 92, 94, 64, 71, 87, 51]]
 
-    herding = Herding(budget_size=budget_size,
-                      num_classes=num_classes,
-                      cosine_distance=True,
-                      storing_methods='clips',
-                      budget_type='class'
-    )
+    manager = PredefinedMemoryManager(exemplar_file='/home/ninv/MyProjects/mmaction2-cil/min_distance_set.pkl',
+                                      task_splits=task_splits)
 
-    labels = torch.tensor(random.choices(range(num_classes), k=num_videos), dtype=torch.long)
-    all_features = torch.rand(num_videos, num_clips, num_samples, dims)
-
-    exemplar = herding.construct_exemplar(all_features, labels)
-    print(exemplar)
-
-    herding = Herding(budget_size=budget_size,
-                      num_classes=num_classes,
-                      cosine_distance=True,
-                      storing_methods='videos',
-                      budget_type='class'
-                      )
-
-    labels = torch.tensor(random.choices(range(num_classes), k=num_videos), dtype=torch.long)
-    all_features = torch.rand(num_videos, num_samples, dims)
-
-    exemplar = herding.construct_exemplar(all_features, labels)
-    print(exemplar)
+    exemplar_meta = manager.construct_exemplar(1)
 
 
 if __name__ == '__main__':
