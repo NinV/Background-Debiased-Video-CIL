@@ -3,46 +3,47 @@ import numpy as np
 from scipy.spatial.distance import cdist
 
 
-def topk(a, k):
-    """
-    http://seanlaw.github.io/2020/01/03/finding-top-or-bottom-k-in-a-numpy-array/
-    """
-    return np.argpartition(a, -k)[-k:]
+def uniform_sample_offsets(mem_size: int, num_bucket: int, sample_size: int):
+    bucket_size = sample_size // num_bucket
+    assert bucket_size >= mem_size
 
+    start = int(bucket_size / 2 - mem_size / 2)
+    offsets = []
+    for i in range(num_bucket):
+        offsets.append(start)
+        start += bucket_size
 
-def botk(a, k):
-    return np.argpartition(a, k)[:k]
+    return offsets
 
 
 def main():
     with open('features_from_pretrained_place365.pkl', 'rb') as f:
         data = pickle.load(f)
 
-    k = 5
-    min_distance_set = {}
-    max_distance_set = {}
+    mem_size = 5
+    num_brackets = 8
+    exemplar_brackets = [{} for _ in range(num_brackets)]
     for cls_idx in range(101):
-        min_distance_set[cls_idx] = {}
-        max_distance_set[cls_idx] = {}
-
         train_features = [record['features'] for record in data['train'][cls_idx]]
         val_features = [record['features'] for record in data['val'][cls_idx]]
-        distance = 1 - cdist(train_features, val_features, metric='cosine')
+        distance = cdist(train_features, val_features, metric='cosine')
         distance_to_val_set = np.min(distance, axis=1)
+        sorted_indices = np.argsort(distance_to_val_set)
 
-        topk_indices = topk(distance_to_val_set, k)
-        max_distance_set[cls_idx]['records'] = [data['train'][cls_idx][i] for i in topk_indices]
-        max_distance_set[cls_idx]['mean_distance'] = distance_to_val_set[topk_indices].mean()
+        offsets = uniform_sample_offsets(mem_size, num_brackets, len(sorted_indices))
+        for i in range(num_brackets):
+            # training_video_indices = sorted_indices[i*mem_size: (i+1)*mem_size]
+            training_video_indices = sorted_indices[offsets[i]: offsets[i] + mem_size]
+            exemplar_brackets[i][cls_idx] = {}
+            exemplar_brackets[i][cls_idx]['records'] = [data['train'][cls_idx][i] for i in training_video_indices]
+            exemplar_brackets[i][cls_idx]['mean_class_distance'] = distance_to_val_set[training_video_indices].mean()
 
-        botk_indices = botk(distance_to_val_set, k)
-        min_distance_set[cls_idx]['records'] = [data['train'][cls_idx][i] for i in botk_indices]
-        min_distance_set[cls_idx]['mean_distance'] = distance_to_val_set[botk_indices].mean()
+    for i, bracket in enumerate(exemplar_brackets):
+        mean_distance = np.mean([class_exemplar['mean_class_distance'] for class_exemplar in bracket.values()])
+        print('bracket {} distance: {}'.format(i, mean_distance))
 
-    with open('min_distance_set.pkl', 'wb') as f:
-        pickle.dump(min_distance_set, f)
-
-    with open('max_distance_set.pkl', 'wb') as f:
-        pickle.dump(max_distance_set, f)
+        with open('bracket_{}.pkl'.format(i), 'wb') as f:
+            pickle.dump(bracket, f)
 
 
 if __name__ == '__main__':

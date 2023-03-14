@@ -1,7 +1,7 @@
-from typing import List, Union, Dict
+from typing import List, Union
 import pathlib
-import random
-import json, pickle
+import pickle
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -182,6 +182,9 @@ class PredefinedMemoryManager:
         with open(exemplar_file, 'rb') as f:
             exemplars_data_from_file = pickle.load(f)
 
+        mean_distance = np.mean([class_exemplar['mean_class_distance'] for class_exemplar in exemplars_data_from_file.values()])
+        print('Load exemplar list from file: "{}"\nMean distance to test set'.format(exemplar_file, mean_distance))
+
         self.exemplar_list = [{} for _ in range(len(task_splits))]
         for task_idx, task in enumerate(task_splits):
             for original_class_idx in task:
@@ -213,10 +216,10 @@ def main():
                    [82, 30, 20, 41, 58, 42, 60, 36, 40, 45],
                    [89, 0, 61, 1, 92, 94, 64, 71, 87, 51]]
 
-    manager = PredefinedMemoryManager(exemplar_file='/home/ninv/MyProjects/mmaction2-cil/min_distance_set.pkl',
+    manager = PredefinedMemoryManager(exemplar_file='/home/ninv/MyProjects/mmaction2-cil/bracket_0.pkl',
                                       task_splits=task_splits)
 
-    exemplar_meta = manager.construct_exemplar(1)
+    exemplar_meta = manager.construct_exemplar(0)
 
 
 if __name__ == '__main__':
