@@ -2,50 +2,44 @@ import os
 data_dir = os.environ['VIDEO_CIL_ROOT']
 
 # base settings
-gpu_ids = 2
+gpu_ids = 1
 
 # 8 gpus setting
 # videos_per_gpu = 12   # 8 gpus x 12 videos (single gpu setting)
 # workers_per_gpu = 2   # 8 gpu setting
 
 # single gpu setting for traning
-videos_per_gpu = 24
+videos_per_gpu = 48
 workers_per_gpu = 4
-accumulate_grad_batches = 1
+accumulate_grad_batches = 2
 
 # single gpu setting for testing
 testing_videos_per_gpu = 1
 testing_workers_per_gpu = 2
 
-work_dir = 'work_dirs/icarl_hmdb51_seed_1000_inc_25_stages_bgmix_plus_randAug'
+work_dir = 'work_dirs/icarl_seed_1993_inc_10_stages_video_mix'
 
 
-task_splits = [[9, 34, 8, 43, 29, 6, 3, 26, 2, 15, 45, 39, 50, 16, 17, 19, 49, 4, 32, 44, 22, 31, 11, 12, 5, 14], [10],
-               [21], [18], [13], [37], [33], [42], [35], [24], [47], [20], [38], [36], [27], [46], [41], [40], [25],
-               [48], [1], [28], [30], [0], [7], [23]]
+task_splits = [
+    [68, 56, 78, 8, 23, 84, 90, 65, 74, 76, 40, 89, 3, 92, 55, 9, 26, 80, 43, 38, 58, 70, 77, 1, 85, 19, 17, 50, 28, 53,
+     13, 81, 45, 82, 6, 59, 83, 16, 15, 44, 91, 41, 72, 60, 79, 52, 20, 10, 31, 54, 37], [95, 14, 71, 96, 99],
+    [98, 2, 64, 66, 42], [22, 35, 86, 24, 34], [87, 21, 100, 0, 88], [27, 18, 94, 11, 12], [47, 25, 30, 46, 62],
+    [69, 36, 61, 7, 63], [75, 5, 32, 4, 51], [48, 73, 93, 39, 67], [29, 97, 49, 57, 33]]
 
-methods = 'icarl'
+
+
+# select one of ['base', 'oracle', 'finetune']
+methods = 'icarl_video_mix'
+video_mix_prob = 0.5
+video_mix_alpha = 1.0
+randAug_prob = 0.5
 starting_task = 0
-ending_task = 25
-# use_nme_classifier = False
+ending_task = 10
 use_cbf = False
-cbf_train_backbone = False
 budget_size = 5
 storing_methods = 'videos'
 budget_type = 'class'
 num_epochs_per_task = 50
-
-"""
-mode: bgmix_plus_randAug 
-    bgmix_prob = 1 - randAug_prob
-
-mode: randAug only
-    randAug_prob = 2    # set any value >= 1.0
-
-mode: bgmix only
-    randAug_prob = -1   # set any value < 0.0
-"""
-randAug_prob = 0.75     # bgmix_prob = 0.25
 
 # mmaction2 model config
 # model settings
@@ -54,15 +48,15 @@ model = dict(
     type='CILRecognizer2D',
     backbone=dict(
         type='ResNetTSM',
-        pretrained='https://download.pytorch.org/models/resnet50-0676ba61.pth',
-        depth=50,
+        pretrained='https://download.pytorch.org/models/resnet34-333f7ec4.pth',
+        depth=34,
         norm_eval=False,
         num_segments=8,
         shift_div=8),
     cls_head=dict(
         type='IncrementalTSMHead',
         num_classes=starting_num_classes,
-        in_channels=2048,
+        in_channels=512,
         inc_head_config=dict(type='SimpleLinear',
                              out_features=starting_num_classes),
         num_segments=8,
@@ -77,7 +71,10 @@ model = dict(
     train_cfg=None,
     test_cfg=dict(average_clips='prob'))
 
+
 repr_hook = 'cls_head.avg_pool'     # extract representation
+
+# cil optimizer and lr_scheduler
 optimizer = dict(
     type='SGD',
     constructor='CILTSMOptimizerConstructorImprovised',
@@ -86,13 +83,14 @@ optimizer = dict(
     momentum=0.9,
     weight_decay=0.0001)
 optimizer_config = dict(grad_clip=dict(max_norm=20, norm_type=2))
+
 lr_scheduler = dict(type='MultiStepLR', params=dict(milestones=[20, 30], gamma=0.1))
 
 # dataset settings
 data_root = os.path.join(data_dir, 'rawframes')
 test_split = 1
-train_ann_file = os.path.join(data_dir, 'hmdb51_train_split_{}_rawframes.txt'.format(test_split))
-val_ann_file = os.path.join(data_dir, 'hmdb51_val_split_{}_rawframes.txt'.format(test_split))
+train_ann_file = os.path.join(data_dir, 'ucf101_train_split_{}_rawframes.txt'.format(test_split))
+val_ann_file = os.path.join(data_dir, 'ucf101_val_split_{}_rawframes.txt'.format(test_split))
 cil_ann_file_template = '{}_task_{}.txt'        # requre exact 2 placeholders
 
 img_norm_cfg = dict(
@@ -113,7 +111,7 @@ train_pipeline = [
     dict(type='Resize', scale=(224, 224), keep_ratio=False),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='FormatShape', input_format='NCHW'),
-    dict(type='Collect', keys=['imgs', 'label', 'randAug'], meta_keys=[]),
+    dict(type='Collect', keys=['imgs', 'label'], meta_keys=[]),
     dict(type='ToTensor', keys=['imgs', 'label'])
 ]
 val_pipeline = [
@@ -160,29 +158,23 @@ features_extraction_pipeline = [
     dict(type='ToTensor', keys=['imgs', 'label'])
 ]
 
-dataset_type = 'BackgroundMixDataset'
-background_dir = os.path.join(data_dir, 'bg_extract')
+dataset_type = 'RawframeDataset'
 data = dict(
     train=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
-        bg_dir=background_dir,
         data_prefix=data_root,
         pipeline=train_pipeline,
-        alpha=0.5,
-        with_randAug=True,
     ),
     val=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
-        bg_dir=background_dir,
         data_prefix=data_root,
         pipeline=val_pipeline,
         test_mode=True),
     test=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
-        bg_dir=background_dir,
         data_prefix=data_root,
         pipeline=test_pipeline,
         test_mode=True),
@@ -190,7 +182,6 @@ data = dict(
     features_extraction=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
-        bg_dir=background_dir,
         data_prefix=data_root,
         pipeline=features_extraction_pipeline,
         test_mode=True),
@@ -199,7 +190,6 @@ data = dict(
     exemplar=dict(
         type=dataset_type,
         ann_file='',                    # need to update this value before using
-        bg_dir=background_dir,
         data_prefix=data_root,
         pipeline=train_pipeline),
 )
