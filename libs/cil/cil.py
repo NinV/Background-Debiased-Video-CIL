@@ -22,6 +22,7 @@ from ..module_hooks import OutputHook
 from .memory_selection import Herding
 from .icarl import ICARLModel
 from .icarl_video_mix import ICARLVideoMix, ICARLFramewiseCutMix
+from .icarl_mixup import ICARLMixUp
 from ..utils import print_mean_accuracy, build_lr_scheduler, AverageMeter
 from ..loader import BackgroundMixDataset, ActorCutMixDataset
 
@@ -643,6 +644,8 @@ class CILTrainer:
             self.cil_model = ICARLVideoMix(config)
         elif config.methods == 'icarl_framewise_cutmix':
             self.cil_model = ICARLFramewiseCutMix(config)
+        elif config.methods == 'icarl_mixup':
+            self.cil_model = ICARLMixUp(config)
         else:
             raise ValueError
         self.cil_model.controller = self
