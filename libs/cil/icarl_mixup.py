@@ -186,7 +186,7 @@ class ICARLMixUp(ICARLModel):
         targets = F.one_hot(targets.squeeze(dim=1), self.num_classes(self.current_task)).float()
         background_labels = batch_data['background_label']
         background_labels = F.one_hot(background_labels, self.num_classes(self.current_task)).float()
-        alpha = batch_data['alpha'].view(-1, 1)
+        alpha = batch_data['alpha'].view(-1, 1).float()
         targets = alpha * targets + (1 - alpha) * torch.mean(background_labels, dim=1)
 
         if self.current_task > 0:
