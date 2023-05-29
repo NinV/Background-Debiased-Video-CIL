@@ -23,7 +23,13 @@ class ICARLVideoMix(ICARLModel):
         # x.shape = (batch_size, channels, T, H, W)
         imgs, targets = batch_data['imgs'], batch_data['label']
         targets = F.one_hot(targets.squeeze(dim=1), self.num_classes(self.current_task)).float()
-        imgs, targets = tubemix(imgs, targets, alpha, prob)
+
+        if hasattr(self.config, 'videomix_type'):
+            method = self.config. videomix_type
+        else:
+            method = 'spatial-videomix'
+
+        imgs, targets = tubemix(imgs, targets, alpha, prob, method)
         cls_score = self.current_model(imgs, return_loss=False)
         if self.current_task > 0:
             previous_task_num_classes = self.num_classes(self.current_task - 1)
@@ -45,7 +51,7 @@ class ICARLVideoMix(ICARLModel):
         return loss
 
 
-def tubemix(x, y, alpha, prob):
+def tubemix(x, y, alpha, prob, method='spatial-videomix'):
     if prob < 0:
         raise ValueError('prob must be a positive value')
 
@@ -56,10 +62,21 @@ def tubemix(x, y, alpha, prob):
         lam = np.random.beta(alpha, alpha)
 
         bbx1, bby1, bbx2, bby2 = rand_bbox(x[:, :, 0, :, :].size(), lam)
-        x[:, :, :, bbx1:bbx2, bby1:bby2] = x[batch_idx, :, :, bbx1:bbx2, bby1:bby2]
-        lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (x.size()[-1] * x.size()[-2]))
-        tube_y = y * lam + y[batch_idx] * (1 - lam)
-        return x, tube_y
+        if method == 'spatial-videomix':
+            x[:, :, :, bbx1:bbx2, bby1:bby2] = x[batch_idx, :, :, bbx1:bbx2, bby1:bby2]
+            lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (x.size()[-1] * x.size()[-2]))
+            tube_y = y * lam + y[batch_idx] * (1 - lam)
+            return x, tube_y
+        elif method == 'spatial-temporal-videomix':
+            _, num_segments, = x.shape[:2]
+            t1 = random.randint(0, num_segments - 2)
+            t2 = random.randint(t1 + 1, num_segments)
+            x[:, t1:t2, :, bbx1:bbx2, bby1:bby2] = x[batch_idx, t1:t2, :, bbx1:bbx2, bby1:bby2]
+            lam = 1 - (bbx2 - bbx1) * (bby2 - bby1) * (t2 - t1) / (x.size()[-1] * x.size()[-2] * num_segments)
+            tube_y = y * lam + y[batch_idx] * (1 - lam)
+            return x, tube_y
+        else:
+            raise ValueError
     else:
         return x, y
 
