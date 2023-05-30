@@ -32,7 +32,7 @@ task_splits = [[68, 56, 78, 8, 23, 84, 90, 65, 74, 76, 40, 89, 3, 92, 55, 9, 26,
 # select one of ['base', 'oracle', 'finetune']
 methods = 'icarl_video_mix'
 videomix_type = 'spatial-temporal-videomix'
-video_mix_prob = 0.5
+video_mix_prob = 1.0
 video_mix_alpha = 1.0
 randAug_prob = 0.5
 starting_task = 0
