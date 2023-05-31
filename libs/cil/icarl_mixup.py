@@ -127,20 +127,20 @@ class MixUpDataset(RawframeDataset):
         results = self._prepare_frames(idx)
         if random.random() < self.mixup_prob:
             if self.method == 'framewise':
-                results = self.framewise_mixup(results)
+                results, alpha = self.framewise_mixup(results)
             elif self.method == 'videowise':
-                results = self.videowise_mixup(results)
+                results, alpha = self.videowise_mixup(results)
             else:
                 raise ValueError
         else:
             results = self.randAug_pipeline(results)
-
+            alpha = 1
             if self.method == 'framewise':
                 results['background_label'] = np.ones(self.num_segments, dtype=int) * results['label']
             else:
                 results['background_label'] = results['label']
         results = self.out_pipeline(results)
-        results['alpha'] = self.alpha
+        results['alpha'] = alpha
         return results
 
     def _prepare_frames(self, idx):
@@ -158,10 +158,11 @@ class MixUpDataset(RawframeDataset):
         scene_video = self._prepare_frames(scene_video_index)
         scene_video = self.video_pipeline(scene_video)
 
+        alpha = np.random.beta(1.0, 1.0)
         for t in range(self.num_segments):
-            result['imgs'][t] = self.alpha * result['imgs'][t] + (1 - self.alpha) * scene_video['imgs'][0]
+            result['imgs'][t] = alpha * result['imgs'][t] + (1 - alpha) * scene_video['imgs'][0]
         result['background_label'] = scene_video['label']
-        return result
+        return result, alpha
 
     def framewise_mixup(self, result):
         result = self.video_pipeline(result)
@@ -172,7 +173,7 @@ class MixUpDataset(RawframeDataset):
             scene_video = self.scene_video_pipeline(scene_video)
             result['imgs'][t] = self.alpha * result['imgs'][t] + (1 - self.alpha) * scene_video['imgs'][0]
             result['background_label'].append(scene_video['label'])
-        return result
+        return result, self.alpha
 
     def prepare_test_frames(self, idx):  # do not use this class for testing
         raise NotImplementedError
